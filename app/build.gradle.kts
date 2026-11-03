@@ -39,7 +39,7 @@ android {
                 arguments.addAll(
                     listOf(
                         "-DANDROID_STL=c++_static",
-                        "-DANDROID_PLATFORM=android-24"
+                        "-DANDROID_PLATFORM=android-26"
                     )
                 )
             }

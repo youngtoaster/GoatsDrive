@@ -1,6 +1,8 @@
 #include "ring_buffer.h"
 
+#if HAVE_AAUDIO
 #include <aaudio/AAudio.h>
+#endif
 #include <android/api-level.h>
 #include <android/log.h>
 #include <SLES/OpenSLES.h>
@@ -35,6 +37,7 @@ public:
         LOGI("Initializing Audio Sink (API Level: %d, Rate: %d Hz, Channels: %d)",
              apiLevel, sampleRate, channelCount);
 
+#if HAVE_AAUDIO
         if (apiLevel >= 26) {
             if (initAAudio()) {
                 LOGI("AAudio low-latency sink active");
@@ -42,6 +45,7 @@ public:
             }
             LOGW("AAudio init failed. Falling back to OpenSL ES...");
         }
+#endif
 
         if (initOpenSLES()) {
             LOGI("OpenSL ES low-latency sink active");
@@ -55,7 +59,9 @@ public:
     void stop() {
         m_running.store(false, std::memory_order_release);
 
+#if HAVE_AAUDIO
         stopAAudio();
+#endif
         stopOpenSLES();
 
         m_audioBuffer.reset();
@@ -77,7 +83,9 @@ private:
           m_channels(2),
           m_running(false),
           m_ducked(false),
+#if HAVE_AAUDIO
           m_aaudioStream(nullptr),
+#endif
           m_slEngineObject(nullptr),
           m_slEngine(nullptr),
           m_slOutputMixObject(nullptr),
@@ -90,9 +98,10 @@ private:
         stop();
     }
 
-    // -----------------------------------------------------------------------------
+#if HAVE_AAUDIO
+    // -------------------------------------------------------------------------
     // AAUDIO PIPELINE (API 26+)
-    // -----------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     bool initAAudio() {
         AAudioStreamBuilder* builder = nullptr;
         aaudio_result_t result = AAudio_createStreamBuilder(&builder);
@@ -154,12 +163,10 @@ private:
 
         size_t bytesRead = m_audioBuffer.read(rawOut, bytesNeeded);
 
-        // Fill underflow with silence
         if (bytesRead < bytesNeeded) {
             std::memset(rawOut + bytesRead, 0, bytesNeeded - bytesRead);
         }
 
-        // Automotive Audio Ducking: Attenuate by ~14dB (divide by 4) during nav prompts
         if (m_ducked.load(std::memory_order_relaxed)) {
             const int totalSamples = numFrames * m_channels;
             for (int i = 0; i < totalSamples; ++i) {
@@ -169,11 +176,12 @@ private:
 
         return AAUDIO_CALLBACK_RESULT_CONTINUE;
     }
+#endif
 
-    // -----------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
     // OPENSL ES PIPELINE (Fallback for API 24-25 & legacy DSP MCU)
-    // -----------------------------------------------------------------------------
-    static constexpr size_t OPENSL_BUF_SIZE = 2048; // 1024 samples (stereo)
+    // -------------------------------------------------------------------------
+    static constexpr size_t OPENSL_BUF_SIZE = 2048;
     alignas(16) uint8_t m_openSlBuffers[2][OPENSL_BUF_SIZE];
     size_t m_currentPcmIndex;
 
@@ -200,7 +208,7 @@ private:
         SLDataFormat_PCM format_pcm = {
             SL_DATAFORMAT_PCM,
             static_cast<SLuint32>(m_channels),
-            static_cast<SLuint32>(m_sampleRate * 1000), // mHz
+            static_cast<SLuint32>(m_sampleRate * 1000),
             SL_PCMSAMPLEFORMAT_FIXED_16,
             SL_PCMSAMPLEFORMAT_FIXED_16,
             (m_channels == 2) ? (SL_SPEAKER_FRONT_LEFT | SL_SPEAKER_FRONT_RIGHT) : SL_SPEAKER_FRONT_CENTER,
@@ -208,7 +216,6 @@ private:
         };
 
         SLDataSource audioSrc = {&loc_bufq, &format_pcm};
-
         SLDataLocator_OutputMix loc_outmix = {SL_DATALOCATOR_OUTPUTMIX, m_slOutputMixObject};
         SLDataSink audioSnk = {&loc_outmix, nullptr};
 
@@ -235,7 +242,6 @@ private:
 
         m_running.store(true, std::memory_order_release);
 
-        // Pre-enqueue priming buffers
         std::memset(m_openSlBuffers[0], 0, OPENSL_BUF_SIZE);
         std::memset(m_openSlBuffers[1], 0, OPENSL_BUF_SIZE);
         (*m_slBufferQueue)->Enqueue(m_slBufferQueue, m_openSlBuffers[0], OPENSL_BUF_SIZE);
@@ -299,10 +305,10 @@ private:
 
     alignas(64) AudioRingBuffer m_audioBuffer;
 
-    // AAudio handles
+#if HAVE_AAUDIO
     AAudioStream* m_aaudioStream;
+#endif
 
-    // OpenSL handles
     SLObjectItf m_slEngineObject;
     SLEngineItf m_slEngine;
     SLObjectItf m_slOutputMixObject;

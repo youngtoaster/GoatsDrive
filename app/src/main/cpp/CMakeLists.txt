@@ -36,12 +36,20 @@ add_library(
     native-audio.cpp
 )
 
-find_library(log-lib log)
-find_library(android-lib android)
-find_library(mediandk-lib mediandk)
+find_library(log-lib log REQUIRED)
+find_library(android-lib android REQUIRED)
+find_library(mediandk-lib mediandk REQUIRED)
+find_library(opensles-lib OpenSLES REQUIRED)
+find_library(jnigraphics-lib jnigraphics REQUIRED)
+
+# AAudio was introduced in API 26; find optionally for backward compatibility
 find_library(aaudio-lib aaudio)
-find_library(opensles-lib OpenSLES)
-find_library(jnigraphics-lib jnigraphics)
+
+set(OPTIONAL_LIBS "")
+if(aaudio-lib)
+    list(APPEND OPTIONAL_LIBS ${aaudio-lib})
+    add_compile_definitions(HAVE_AAUDIO=1)
+endif()
 
 target_link_libraries(
     goatsdrive_engine
@@ -49,7 +57,7 @@ target_link_libraries(
     ${log-lib}
     ${android-lib}
     ${mediandk-lib}
-    ${aaudio-lib}
     ${opensles-lib}
     ${jnigraphics-lib}
+    ${OPTIONAL_LIBS}
 )
