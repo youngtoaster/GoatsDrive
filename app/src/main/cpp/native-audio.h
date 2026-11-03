@@ -60,6 +60,8 @@ private:
     SLObjectItf m_slPlayerObject;
     SLPlayItf m_slPlayerPlay;
     SLAndroidSimpleBufferQueueItf m_slBufferQueue;
+    static constexpr size_t OPENSL_BUF_SIZE = 2048;
+    alignas(16) uint8_t m_openSlBuffers[2][OPENSL_BUF_SIZE];
     size_t m_currentPcmIndex;
 };
 
