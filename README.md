@@ -25,15 +25,18 @@ Unlike stock Chinese head unit apps that consume 350MB+ RAM and stutter under lo
 You can deploy GoatsDrive to your car's head unit directly from your phone in under 30 seconds—**no computer required**.
 
 ### Method 1: GoatsInstaller Companion App (Recommended)
-1. Download **`GoatsInstaller.apk`** from [Releases](https://github.com/youngtoaster/GoatsDrive/releases/latest) onto your Android smartphone.
-2. Connect your phone to your car's Wi-Fi hotspot (or turn on your phone's personal hotspot and connect the head unit).
-3. Open **GoatsInstaller** on your phone.
-4. The head unit IP is auto-detected (or enter it manually, e.g. `192.168.43.1:5555`).
-5. Ensure **"Disable bloated factory ZLink5"** is checked.
-6. Tap **⚡ Flash GoatsDrive to Head Unit**.
-   * Automatically disables factory ZLink5.
-   * Uploads and installs `GoatsDrive.apk`.
-   * Grants automotive overlay & battery whitelist permissions.
+1. Download **`GoatsInstaller.apk`** from [Latest GitHub Releases](https://github.com/youngtoaster/GoatsDrive/releases/latest) onto your Android smartphone.
+2. Connect your phone to your car's Wi-Fi hotspot (or turn on your phone's personal hotspot and connect the head unit to it).
+3. Open **GoatsInstaller** on your phone:
+   * Tap **📖 Connection & Setup Guide** inside the app for step-by-step instructions and factory PINs (`3368`, `8888`, `1617`) to enable Wireless ADB on FYT, Topway, or Allwinner boards.
+   * Tap **🔍 Test ADB Connection** to verify your head unit is reachable and detect its hardware model.
+   * Tap **🔄 Check GitHub** — the installer automatically checks and downloads the newest `GoatsDrive.apk` release build before flashing.
+4. Ensure **"Disable bloated factory ZLink5"** is checked.
+5. Tap **⚡ Flash GoatsDrive to Head Unit**.
+   * Automatically fetches the latest receiver APK.
+   * Disables factory ZLink5 to stop MCU crashes.
+   * Uploads and installs `GoatsDrive.apk` via ADB.
+   * Grants automotive overlay (`SYSTEM_ALERT_WINDOW`) & battery whitelist permissions.
    * Immediately launches GoatsDrive on the head unit screen!
 
 ### Method 2: One-Line Termux / ADB Command (From Phone or PC)

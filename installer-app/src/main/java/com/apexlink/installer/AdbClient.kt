@@ -35,6 +35,39 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
     private var outputStream: OutputStream? = null
     private var localStreamId = 1
 
+    data class TestResult(
+        val success: Boolean,
+        val model: String = "",
+        val androidVersion: String = "",
+        val platform: String = "",
+        val errorMessage: String = ""
+    )
+
+    fun testConnection(timeoutMs: Int = 4000): TestResult {
+        return try {
+            if (!connect(timeoutMs)) {
+                TestResult(
+                    success = false,
+                    errorMessage = "Connection refused or timed out on port $port. Check if Wireless ADB is enabled in Factory Settings."
+                )
+            } else {
+                val model = executeShell("getprop ro.product.model").trim()
+                val androidVer = executeShell("getprop ro.build.version.release").trim()
+                val platform = executeShell("getprop ro.board.platform").trim()
+                TestResult(
+                    success = true,
+                    model = if (model.isNotEmpty()) model else "Generic Car Head Unit",
+                    androidVersion = if (androidVer.isNotEmpty()) androidVer else "Unknown",
+                    platform = if (platform.isNotEmpty()) platform else "ARM"
+                )
+            }
+        } catch (e: Exception) {
+            TestResult(success = false, errorMessage = e.message ?: "Connection error")
+        } finally {
+            close()
+        }
+    }
+
     fun connect(timeoutMs: Int = 5000): Boolean {
         return try {
             val s = Socket()
