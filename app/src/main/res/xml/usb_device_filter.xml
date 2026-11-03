@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Google Android Open Accessory (AOA 2.0) Device Target: Vendor 0x18D1 (6289) -->
+    <!-- Product ID 0x2D00 (11520): Accessory Only -->
+    <usb-device vendor-id="6289" product-id="11520" />
+    <!-- Product ID 0x2D01 (11521): Accessory + ADB -->
+    <usb-device vendor-id="6289" product-id="11521" />
+
+    <!-- Apple Inc. Vendor ID: 0x05AC (1452) for CarPlay USB Multiplexer -->
+    <usb-device vendor-id="1452" />
+
+    <!-- Common Android Smartphone Manufacturer Vendor IDs for Dynamic AOA Mode Switch -->
+    <!-- Google Pixel -->
+    <usb-device vendor-id="6289" />
+    <!-- Samsung Electronics (0x04E8 = 1256) -->
+    <usb-device vendor-id="1256" />
+    <!-- Xiaomi (0x2717 = 10007) -->
+    <usb-device vendor-id="10007" />
+    <!-- Huawei (0x12D1 = 4817) -->
+    <usb-device vendor-id="4817" />
+    <!-- OnePlus / Oppo (0x22D9 = 8921) -->
+    <usb-device vendor-id="8921" />
+</resources>

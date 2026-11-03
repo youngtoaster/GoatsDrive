@@ -1,0 +1,95 @@
+name: Build and Release GoatsDrive
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APKs & Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: |
+          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x gradlew
+
+      - name: Build Receiver & Installer APKs
+        run: |
+          ./gradlew assembleDebug assembleRelease --stacktrace
+
+      - name: Prepare Release Artifacts
+        run: |
+          mkdir -p release-artifacts
+          # Copy Head Unit Receiver APK
+          if [ -f app/build/outputs/apk/release/app-release-unsigned.apk ]; then
+            cp app/build/outputs/apk/release/app-release-unsigned.apk release-artifacts/GoatsDrive.apk
+          elif [ -f app/build/outputs/apk/release/app-release.apk ]; then
+            cp app/build/outputs/apk/release/app-release.apk release-artifacts/GoatsDrive.apk
+          else
+            cp app/build/outputs/apk/debug/app-debug.apk release-artifacts/GoatsDrive.apk
+          fi
+
+          # Copy Phone Companion Installer APK
+          if [ -f installer-app/build/outputs/apk/release/installer-app-release-unsigned.apk ]; then
+            cp installer-app/build/outputs/apk/release/installer-app-release-unsigned.apk release-artifacts/GoatsInstaller.apk
+          elif [ -f installer-app/build/outputs/apk/release/installer-app-release.apk ]; then
+            cp installer-app/build/outputs/apk/release/installer-app-release.apk release-artifacts/GoatsInstaller.apk
+          else
+            cp installer-app/build/outputs/apk/debug/installer-app-debug.apk release-artifacts/GoatsInstaller.apk
+          fi
+
+          echo "Artifacts prepared:"
+          ls -la release-artifacts/
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: goatsdrive-apks
+          path: release-artifacts/*
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name == 'main' && 'v1.0.0' || github.ref_name }}
+          name: "GoatsDrive v1.0.0 — Zero-Copy Projection Receiver"
+          body: |
+            ## ⚡ GoatsDrive v1.0.0 Release
+
+            Ultra-lightweight, zero-copy Android Auto & CarPlay projection receiver designed for 2GB RAM aftermarket Android head units (FYT 7862/8581, Topway TS10/TS18, T3L).
+
+            ### 📦 Included APKs:
+            * **`GoatsDrive.apk`**: The zero-copy receiver engine to run directly on the car head unit.
+            * **`GoatsInstaller.apk`**: Companion Android phone app for 1-click Wireless ADB installation, ZLink5 removal, and automated permission granting.
+
+            ### 🚀 Quick Install from Phone:
+            1. Install `GoatsInstaller.apk` on your Android phone.
+            2. Connect phone and Head Unit to the same Wi-Fi (or turn on Phone Hotspot).
+            3. Tap **⚡ Flash GoatsDrive to Head Unit** to automatically disable factory ZLink and deploy GoatsDrive!
+          files: |
+            release-artifacts/GoatsDrive.apk
+            release-artifacts/GoatsInstaller.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

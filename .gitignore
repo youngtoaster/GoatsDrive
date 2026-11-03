@@ -1,0 +1,14 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+app/build/
+installer-app/build/
+*.apk
+!GoatsDrive.apk
+!GoatsInstaller.apk
