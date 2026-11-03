@@ -1,4 +1,6 @@
-#include "ring_buffer.h"
+#include "transport_io.h"
+#include "native-decoder.h"
+#include "native-audio.h"
 
 #include <jni.h>
 #include <android/log.h>
@@ -8,38 +10,6 @@
 #define TAG "GoatsDrive_JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
-
-// Forward declarations of engine singletons
-namespace goatsdrive {
-    class TransportIO {
-    public:
-        static TransportIO& getInstance();
-        void setBuffers(VideoRingBuffer* vBuffer, AudioRingBuffer* aBuffer);
-        bool startSocket(int socketFd);
-        bool startUsb(int usbFd);
-        void stop();
-        bool sendInputPacket(const uint8_t* data, size_t length);
-    };
-
-    class NativeVideoDecoder {
-    public:
-        static NativeVideoDecoder& getInstance();
-        bool init(ANativeWindow* window, int width, int height);
-        void stop();
-        VideoRingBuffer& getRingBuffer();
-        uint64_t getDecodedFrames() const;
-        uint64_t getDroppedFrames() const;
-    };
-
-    class NativeAudioSink {
-    public:
-        static NativeAudioSink& getInstance();
-        bool init(int sampleRate, int channelCount);
-        void stop();
-        void setDucked(bool ducked);
-        AudioRingBuffer& getRingBuffer();
-    };
-}
 
 extern "C" {
 
