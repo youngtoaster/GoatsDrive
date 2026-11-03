@@ -183,7 +183,6 @@ private:
     // -------------------------------------------------------------------------
     static constexpr size_t OPENSL_BUF_SIZE = 2048;
     alignas(16) uint8_t m_openSlBuffers[2][OPENSL_BUF_SIZE];
-    size_t m_currentPcmIndex;
 
     bool initOpenSLES() {
         SLresult result = slCreateEngine(&m_slEngineObject, 0, nullptr, 0, nullptr, nullptr);
@@ -315,6 +314,7 @@ private:
     SLObjectItf m_slPlayerObject;
     SLPlayItf m_slPlayerPlay;
     SLAndroidSimpleBufferQueueItf m_slBufferQueue;
+    size_t m_currentPcmIndex;
 };
 
 } // namespace goatsdrive
