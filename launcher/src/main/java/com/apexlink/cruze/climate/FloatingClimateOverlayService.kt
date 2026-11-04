@@ -1,5 +1,8 @@
 package com.apexlink.cruze.climate
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -19,23 +22,27 @@ import com.apexlink.cruze.can.CanBusService
 import com.apexlink.cruze.can.GmDeltaProtocol
 
 /**
- * Floating Automotive Climate HUD that stays persistently visible on top of
- * GoatsDrive / CarPlay / Android Auto sessions via SYSTEM_ALERT_WINDOW.
+ * Non-intrusive floating automotive climate HUD bar running as an overlay (TYPE_APPLICATION_OVERLAY)
+ * across full-screen Apple CarPlay, Android Auto, or navigation apps.
  */
 class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListener {
 
     companion object {
+        private const val CHANNEL_ID = "cruze_floating_climate"
+        private const val NOTIF_ID = 2002
         var isOverlayActive = false
-            private set
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingClimateOverlayService::class.java)
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
 
         fun stop(context: Context) {
-            val intent = Intent(context, FloatingClimateOverlayService::class.java)
-            context.stopService(intent)
+            context.stopService(Intent(context, FloatingClimateOverlayService::class.java))
         }
     }
 
@@ -45,10 +52,10 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
     // UI elements
     private lateinit var driverTempText: TextView
     private lateinit var passengerTempText: TextView
-    private lateinit var driverSeatText: TextView
-    private lateinit var passengerSeatText: TextView
     private lateinit var fanSpeedText: TextView
     private lateinit var acStatusText: TextView
+    private lateinit var driverSeatText: TextView
+    private lateinit var passengerSeatText: TextView
     private lateinit var expandedDrawer: LinearLayout
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -56,6 +63,7 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        startForegroundNotification()
         createOverlayView()
         CanBusService.registerListener(this)
         isOverlayActive = true
@@ -87,6 +95,7 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            y = 12 // comfortable margin above bottom screen bezel
         }
 
         val container = LinearLayout(this).apply {
@@ -100,20 +109,22 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
         }
         container.addView(expandedDrawer)
 
-        // Main Bottom Dock Bar (Tesla Style)
+        // Main Sleek Floating Dock
         val dockBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(24, 10, 24, 10)
+            setPadding(16, 8, 16, 8)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#E60D1117")) // 90% blur dark glass
-                setStroke(1, Color.parseColor("#263238"))
-                cornerRadius = 16f
+                setColor(Color.parseColor("#EE0D1017")) // Deep obsidian glass
+                cornerRadius = 24f
+                setStroke(1, Color.parseColor("#283042"))
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(16, 0, 16, 12) }
+            ).apply {
+                setMargins(20, 0, 20, 10)
+            }
         }
 
         // --- Driver Controls ---
@@ -123,29 +134,29 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
         }
 
-        driverSeatText = createIconButton("♨️ 0").apply {
+        driverSeatText = createIconButton("SEAT 0").apply {
             setOnClickListener {
-                val stage = ClimateController.cycleDriverSeatHeater()
-                text = "♨️ $stage"
-                setTextColor(if (stage > 0) Color.parseColor("#FF5722") else Color.parseColor("#90A4AE"))
+                val stage = ClimateController.cycleDriverSeatHeater(this@FloatingClimateOverlayService)
+                text = "SEAT $stage"
+                setTextColor(if (stage > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
             }
         }
         driverGroup.addView(driverSeatText)
 
-        val driverMinus = createStepButton("-") { ClimateController.adjustDriverTemp(-0.5f) }
+        val driverMinus = createStepButton("-") { ClimateController.adjustDriverTemp(this@FloatingClimateOverlayService, -0.5f) }
         driverGroup.addView(driverMinus)
 
         driverTempText = TextView(this).apply {
-            text = "70°"
-            textSize = 17f
+            text = "68°"
+            textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            setPadding(12, 0, 12, 0)
+            setPadding(10, 0, 10, 0)
         }
         driverGroup.addView(driverTempText)
 
-        val driverPlus = createStepButton("+") { ClimateController.adjustDriverTemp(0.5f) }
+        val driverPlus = createStepButton("+") { ClimateController.adjustDriverTemp(this@FloatingClimateOverlayService, 0.5f) }
         driverGroup.addView(driverPlus)
         dockBar.addView(driverGroup)
 
@@ -153,20 +164,20 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
         val centerGroup = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f)
         }
 
-        fanSpeedText = createIconButton("❄️ Fan 3").apply {
-            setOnClickListener { ClimateController.stepFanSpeed() }
+        fanSpeedText = createIconButton("FAN 3").apply {
+            setOnClickListener { ClimateController.stepFanSpeed(this@FloatingClimateOverlayService) }
         }
         centerGroup.addView(fanSpeedText)
 
         acStatusText = createIconButton("A/C").apply {
-            setOnClickListener { ClimateController.toggleAc() }
+            setOnClickListener { ClimateController.toggleAc(this@FloatingClimateOverlayService) }
         }
         centerGroup.addView(acStatusText)
 
-        val expandBtn = createIconButton("▲ Menu").apply {
+        val expandBtn = createIconButton("CLIMATE ▲").apply {
             setOnClickListener {
                 expandedDrawer.visibility = if (expandedDrawer.visibility == View.VISIBLE) View.GONE else View.VISIBLE
             }
@@ -181,27 +192,27 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
         }
 
-        val passMinus = createStepButton("-") { ClimateController.adjustPassengerTemp(-0.5f) }
+        val passMinus = createStepButton("-") { ClimateController.adjustPassengerTemp(this@FloatingClimateOverlayService, -0.5f) }
         passGroup.addView(passMinus)
 
         passengerTempText = TextView(this).apply {
             text = "70°"
-            textSize = 17f
+            textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
-            setPadding(12, 0, 12, 0)
+            setPadding(10, 0, 10, 0)
         }
         passGroup.addView(passengerTempText)
 
-        val passPlus = createStepButton("+") { ClimateController.adjustPassengerTemp(0.5f) }
+        val passPlus = createStepButton("+") { ClimateController.adjustPassengerTemp(this@FloatingClimateOverlayService, 0.5f) }
         passGroup.addView(passPlus)
 
-        passengerSeatText = createIconButton("♨️ 0").apply {
+        passengerSeatText = createIconButton("SEAT 0").apply {
             setOnClickListener {
-                val stage = ClimateController.cyclePassengerSeatHeater()
-                text = "♨️ $stage"
-                setTextColor(if (stage > 0) Color.parseColor("#FF5722") else Color.parseColor("#90A4AE"))
+                val stage = ClimateController.cyclePassengerSeatHeater(this@FloatingClimateOverlayService)
+                text = "SEAT $stage"
+                setTextColor(if (stage > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
             }
         }
         passGroup.addView(passengerSeatText)
@@ -221,25 +232,24 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(16, 12, 16, 12)
+            setPadding(14, 10, 14, 10)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#F2161F2C"))
+                setColor(Color.parseColor("#F4121722"))
                 cornerRadius = 16f
-                setStroke(1, Color.parseColor("#00E5FF"))
+                setStroke(1, Color.parseColor("#283042"))
             }
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { setMargins(0, 0, 0, 8) }
 
-            addView(createDrawerButton("Auto") { ClimateController.toggleAuto() })
-            addView(createDrawerButton("Max A/C") { ClimateController.toggleMaxAc() })
-            addView(createDrawerButton("Recirc") { ClimateController.toggleRecirculation() })
-            addView(createDrawerButton("Front Defrost") { ClimateController.toggleFrontDefrost() })
-            addView(createDrawerButton("Rear Defrost") { ClimateController.toggleRearDefrost() })
-            addView(createDrawerButton("Sync") {
-                ClimateController.state.dualZoneSync = !ClimateController.state.dualZoneSync
-                CanBusService.notifyUpdate()
+            addView(createDrawerButton("AUTO") { ClimateController.toggleAuto(this@FloatingClimateOverlayService) })
+            addView(createDrawerButton("MAX A/C") { ClimateController.toggleMaxAc(this@FloatingClimateOverlayService) })
+            addView(createDrawerButton("RECIRC") { ClimateController.toggleRecirculation(this@FloatingClimateOverlayService) })
+            addView(createDrawerButton("FRONT DEF") { ClimateController.toggleFrontDefrost(this@FloatingClimateOverlayService) })
+            addView(createDrawerButton("REAR DEF") { ClimateController.toggleRearDefrost(this@FloatingClimateOverlayService) })
+            addView(createDrawerButton("SETTINGS") {
+                CanBusService.openNativeCarSettings(this@FloatingClimateOverlayService)
             })
         }
     }
@@ -247,13 +257,15 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
     private fun createStepButton(text: String, onClick: () -> Unit): Button {
         return Button(this).apply {
             this.text = text
-            textSize = 16f
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#263238"))
-                cornerRadius = 24f
+                setColor(Color.parseColor("#1B2230"))
+                cornerRadius = 12f
             }
-            layoutParams = LinearLayout.LayoutParams(64, 64)
+            setPadding(10, 4, 10, 4)
+            layoutParams = LinearLayout.LayoutParams(40, 40)
             setOnClickListener { onClick() }
         }
     }
@@ -261,14 +273,15 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
     private fun createIconButton(label: String): TextView {
         return TextView(this).apply {
             text = label
-            textSize = 12f
+            textSize = 11.5f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#CFD8DC"))
+            setTextColor(Color.parseColor("#8E9AA8"))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1E293B"))
-                cornerRadius = 14f
+                setColor(Color.parseColor("#151C28"))
+                cornerRadius = 12f
             }
-            setPadding(16, 12, 16, 12)
+            setPadding(12, 8, 12, 8)
+            gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -276,16 +289,18 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
         }
     }
 
-    private fun createDrawerButton(label: String, onClick: () -> Unit): Button {
-        return Button(this).apply {
+    private fun createDrawerButton(label: String, onClick: () -> Unit): TextView {
+        return TextView(this).apply {
             text = label
-            textSize = 11.5f
-            setTextColor(Color.WHITE)
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#D0D7DE"))
             background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1E293B"))
-                cornerRadius = 12f
+                setColor(Color.parseColor("#1C2433"))
+                cornerRadius = 10f
             }
-            setPadding(14, 8, 14, 8)
+            setPadding(12, 7, 12, 7)
+            gravity = Gravity.CENTER
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -297,18 +312,43 @@ class FloatingClimateOverlayService : Service(), CanBusService.VehicleStateListe
     override fun onVehicleStateUpdated(state: GmDeltaProtocol.VehicleState) {}
 
     override fun onClimateStateUpdated(climate: GmDeltaProtocol.ClimateState) {
-        overlayRoot?.post {
-            driverTempText.text = ClimateController.formatTemp(climate.driverTempF)
-            passengerTempText.text = ClimateController.formatTemp(climate.passengerTempF)
-            fanSpeedText.text = if (climate.fanSpeed == 0) "Fan Off" else "❄️ Fan ${climate.fanSpeed}"
-            acStatusText.text = if (climate.acEnabled) "A/C ON" else "A/C OFF"
-            acStatusText.setTextColor(if (climate.acEnabled) Color.parseColor("#00E5FF") else Color.parseColor("#90A4AE"))
+        driverTempText.text = if (climate.driverTempF <= 60.0f) "LO" else if (climate.driverTempF >= 85.0f) "HI" else "${climate.driverTempF.toInt()}°"
+        passengerTempText.text = if (climate.passengerTempF <= 60.0f) "LO" else if (climate.passengerTempF >= 85.0f) "HI" else "${climate.passengerTempF.toInt()}°"
+        fanSpeedText.text = if (climate.fanSpeed == 0) "OFF" else "FAN ${climate.fanSpeed}"
+        acStatusText.setTextColor(if (climate.acEnabled) Color.parseColor("#00E5FF") else Color.parseColor("#8E9AA8"))
+        driverSeatText.text = "SEAT ${climate.driverSeatHeater}"
+        driverSeatText.setTextColor(if (climate.driverSeatHeater > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
+        passengerSeatText.text = "SEAT ${climate.passengerSeatHeater}"
+        passengerSeatText.setTextColor(if (climate.passengerSeatHeater > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
+    }
 
-            driverSeatText.text = "♨️ ${climate.driverSeatHeater}"
-            driverSeatText.setTextColor(if (climate.driverSeatHeater > 0) Color.parseColor("#FF5722") else Color.parseColor("#90A4AE"))
-
-            passengerSeatText.text = "♨️ ${climate.passengerSeatHeater}"
-            passengerSeatText.setTextColor(if (climate.passengerSeatHeater > 0) Color.parseColor("#FF5722") else Color.parseColor("#90A4AE"))
+    private fun startForegroundNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Cruze Climate Overlay",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Keeps HVAC climate controls accessible over CarPlay and Android Auto"
+                setShowBadge(false)
+            }
+            manager.createNotificationChannel(channel)
         }
+
+        val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
+                .setContentTitle("Cruze Climate Active")
+                .setContentText("HVAC controls active over projection")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+                .setContentTitle("Cruze Climate Active")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .build()
+        }
+        startForeground(NOTIF_ID, notification)
     }
 }

@@ -42,10 +42,10 @@ import {
 	Vector3,
 	Vector4,
 	VectorKeyframeTrack
-} from 'three';
+} from './three.module.js';
 
-import { unzlibSync } from '../libs/fflate.module.js';
-import { NURBSCurve } from '../curves/NURBSCurve.js';
+import { unzlibSync } from './fflate.module.js';
+class NURBSCurve {}
 
 let fbxTree;
 let connections;

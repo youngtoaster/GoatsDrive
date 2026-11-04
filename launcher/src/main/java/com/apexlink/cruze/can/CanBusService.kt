@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
@@ -12,10 +13,12 @@ import android.os.Looper
 import android.util.Log
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * High-performance background service listening to aftermarket car head unit CAN-bus hardware.
+ * High-performance background service listening to and broadcasting automotive CAN-bus signals
+ * across FYT, Topway (TS10/TS18), XYAuto, and Microntek head unit architectures.
  */
 class CanBusService : Service() {
 
@@ -42,6 +45,89 @@ class CanBusService : Service() {
                 it.onVehicleStateUpdated(vehicleState)
                 it.onClimateStateUpdated(climateState)
             }
+        }
+
+        /**
+         * Broadcasts a climate or vehicle command to aftermarket head unit MCU daemons.
+         */
+        fun broadcastMcuCommand(context: Context, actionType: String, value: Int) {
+            val targets = listOf(
+                "com.ts.canbus",
+                "com.ts.key.ac",
+                "com.fyt.system.canbus",
+                "com.syu.ms.canbus",
+                "com.syu.canbus",
+                "com.xyauto.canbus",
+                "com.xyauto.aircondition",
+                "com.glsx.action.CAN_SEND",
+                "com.microntek.canbus.send"
+            )
+
+            targets.forEach { action ->
+                try {
+                    val intent = Intent(action).apply {
+                        putExtra("action", actionType)
+                        putExtra("type", actionType)
+                        putExtra("cmd", actionType)
+                        putExtra("value", value)
+                        putExtra("temp", value)
+                        putExtra("fan", value)
+                    }
+                    context.sendBroadcast(intent)
+                } catch (ignored: Exception) {}
+            }
+        }
+
+        /**
+         * Launches the head unit's native factory vehicle settings & climate console.
+         */
+        fun openNativeCarSettings(context: Context): Boolean {
+            val pm = context.packageManager
+            val knownCarApps = listOf(
+                "com.ts.canbus" to "com.ts.canbus.CarInfoActivity",
+                "com.ts.canbus" to "com.ts.canbus.AirActivity",
+                "com.syu.canbus" to "com.syu.canbus.AirActivity",
+                "com.syu.air" to "com.syu.air.MainActivity",
+                "com.xyauto.aircondition" to "com.xyauto.aircondition.MainActivity",
+                "com.xyauto.canbus" to "com.xyauto.canbus.MainActivity",
+                "com.canbus.ac" to "com.canbus.ac.MainActivity",
+                "com.android.settings.car" to "com.android.settings.car.MainActivity",
+                "com.microntek.controlsettings" to "com.microntek.controlsettings.MainActivity"
+            )
+
+            for ((pkg, cls) in knownCarApps) {
+                try {
+                    val intent = Intent().apply {
+                        setClassName(pkg, cls)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                    }
+                    context.startActivity(intent)
+                    return true
+                } catch (ignored: Exception) {}
+            }
+
+            // Fallback: try package launch intent
+            for ((pkg, _) in knownCarApps) {
+                val launchIntent = pm.getLaunchIntentForPackage(pkg)
+                if (launchIntent != null) {
+                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try {
+                        context.startActivity(launchIntent)
+                        return true
+                    } catch (ignored: Exception) {}
+                }
+            }
+
+            // Fallback 2: General settings
+            try {
+                val intent = Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                return true
+            } catch (ignored: Exception) {}
+
+            return false
         }
     }
 
@@ -78,6 +164,8 @@ class CanBusService : Service() {
         val filter = IntentFilter().apply {
             addAction("com.fyt.system.canbus")
             addAction("com.ts.canbus")
+            addAction("com.xyauto.canbus")
+            addAction("com.xyauto.aircondition")
             addAction("com.microntek.canbus")
             addAction("android.hardware.usb.action.USB_DEVICE_ATTACHED")
         }
@@ -105,7 +193,6 @@ class CanBusService : Service() {
 
     private fun startSerialReader() {
         serialThread = Thread {
-            // Common MCU serial UART nodes on FYT, Topway, and T3L platforms
             val candidatePorts = listOf("/dev/ttyMT0", "/dev/ttyS0", "/dev/ttyS1", "/dev/ttyS2")
             var activeStream: FileInputStream? = null
 
@@ -121,7 +208,7 @@ class CanBusService : Service() {
             }
 
             if (activeStream == null) {
-                Log.i(TAG, "Running in CAN simulator/standby mode (No active hardware UART found on host).")
+                Log.i(TAG, "CAN active via system MCU intents.")
                 return@Thread
             }
 
@@ -130,7 +217,6 @@ class CanBusService : Service() {
                 try {
                     val read = activeStream.read(buf)
                     if (read > 0) {
-                        // Frame parser (0x2E sync header)
                         var i = 0
                         while (i < read - 4) {
                             if (buf[i] == 0x2E.toByte()) {

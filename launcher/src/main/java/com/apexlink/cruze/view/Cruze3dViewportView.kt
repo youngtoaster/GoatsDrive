@@ -35,16 +35,24 @@ class Cruze3dViewportView @JvmOverloads constructor(
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
             allowFileAccess = true
+            allowContentAccess = true
             @Suppress("DEPRECATION")
             allowFileAccessFromFileURLs = true
             @Suppress("DEPRECATION")
             allowUniversalAccessFromFileURLs = true
             useWideViewPort = true
             loadWithOverviewMode = true
+            mediaPlaybackRequiresUserGesture = false
         }
 
-        webChromeClient = WebChromeClient()
+        webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
+                android.util.Log.d("Cruze3D_JS", "${message?.message()} -- line ${message?.lineNumber()}")
+                return true
+            }
+        }
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
