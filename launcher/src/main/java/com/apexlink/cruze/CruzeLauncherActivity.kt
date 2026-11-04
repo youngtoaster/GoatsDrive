@@ -77,9 +77,16 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     private lateinit var tpmsRLText: TextView
     private lateinit var tpmsRRText: TextView
 
+    // BCM Card Buttons
+    private lateinit var bcmLockBtn: Button
+    private lateinit var bcmTrunkBtn: Button
+    private lateinit var bcmFogBtn: Button
+    private lateinit var bcmHazardBtn: Button
+
     // Bottom Luxury HVAC & Media Console (Replicating and upgrading factory bottom bar)
     private lateinit var volumeLevelText: TextView
     private lateinit var muteBtn: Button
+    private lateinit var hvacModeStrip: LinearLayout
     private lateinit var hvacPowerBtn: Button
     private lateinit var dualSyncBtn: Button
     private lateinit var acCompressorBtn: Button
@@ -95,6 +102,7 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     private lateinit var passengerSeatHeaterBtn: Button
     private lateinit var fanSpeedBarsContainer: LinearLayout
     private lateinit var fanSpeedLevelLabel: TextView
+    private var isCompactConsoleMode: Boolean = false
 
     // Clock updater
     private val clockRunnable = object : Runnable {
@@ -122,43 +130,55 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         // Suppress native Chinese MCU bottom bar overlay if present
         CanBusService.hideFactoryBottomBar(this)
 
-        val rootScrollView = ScrollView(this).apply {
+        val rootLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#07080B")) // Deep luxury obsidian
-            isFillViewport = true
-            overScrollMode = View.OVER_SCROLL_NEVER
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         }
 
-        val rootLayout = LinearLayout(this).apply {
+        // 1. TOP AUTOMOTIVE STATUS BAR (Clock, Date, Outside Temp, Battery, Central Locks, Dock Fix)
+        rootLayout.addView(buildTopStatusBar())
+
+        // 2. 3D CRUZE LTZ VIEWPORT STAGE (Pinned at top, NEVER scrolls off-screen!)
+        rootLayout.addView(build3dCruzeStage())
+
+        // 3. LOWER INTERACTIVE AUTOMOTIVE CONSOLE (Scrollable cards underneath the 3D car)
+        val consoleScrollView = ScrollView(this).apply {
+            isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1.0f
+            )
+        }
+
+        val consoleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#07080B"))
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 4, 0, 16)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-        rootScrollView.addView(rootLayout)
+        consoleScrollView.addView(consoleLayout)
 
-        // 1. TOP AUTOMOTIVE STATUS BAR (Clock, Date, Outside Temp, Battery, Central Locks)
-        rootLayout.addView(buildTopStatusBar())
+        // Add control cards inside lower scrollable container:
+        // Hero Row (CarPlay / Android Auto + Media Player)
+        consoleLayout.addView(buildHeroRow())
 
-        // 2. 3D CRUZE LTZ VIEWPORT STAGE (Instant 0ms procedural load + interactive doors)
-        rootLayout.addView(build3dCruzeStage())
+        // Secondary Row (Instruments / TPMS + Vehicle BCM Controls)
+        consoleLayout.addView(buildSecondaryRow())
 
-        // 3. PRIMARY HERO ROW (CarPlay / Android Auto + Media Player)
-        rootLayout.addView(buildHeroRow())
+        // Master HVAC Console (Complete, luxury copy & upgrade of factory bottom bar)
+        consoleLayout.addView(buildMasterClimateConsole())
 
-        // 4. SECONDARY ROW (Instruments / TPMS + Vehicle BCM Controls)
-        rootLayout.addView(buildSecondaryRow())
-
-        // 5. MASTER HVAC CONSOLE (Complete, luxury copy & upgrade of factory bottom bar)
-        rootLayout.addView(buildMasterClimateConsole())
-
-        setContentView(rootScrollView)
+        rootLayout.addView(consoleScrollView)
+        setContentView(rootLayout)
 
         // Register CAN-bus listener & start clock
         CanBusService.registerListener(this)
@@ -286,6 +306,19 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                 }
                 addView(batteryVoltageText)
 
+                val dockFixBtn = TextView(this@CruzeLauncherActivity).apply {
+                    text = "📺 DOCK FIX"
+                    setTextColor(Color.parseColor("#00E5FF"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(10, 5, 10, 5)
+                    background = createPillDrawable("#15202B", "#00E5FF")
+                    setOnClickListener {
+                        showDockSetupDialog()
+                    }
+                }
+                addView(dockFixBtn)
+
                 val carSettingsIcon = TextView(this@CruzeLauncherActivity).apply {
                     text = "⚙"
                     setTextColor(Color.parseColor("#94A3B8"))
@@ -310,13 +343,13 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     }
 
     // ==========================================
-    // 2. 3D CRUZE STAGE & QUICK ACTIONS
+    // 2. 3D CRUZE STAGE (Hardware Accelerated WebGL Viewport)
     // ==========================================
     private fun build3dCruzeStage(): View {
         val stageContainer = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                dpToPx(320)
+                dpToPx(240)
             )
             setBackgroundColor(Color.parseColor("#090B10"))
         }
@@ -342,50 +375,6 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
             }
         }
         stageContainer.addView(cruzeViewport)
-
-        // Top Overlay: Quick Vehicle Action Buttons (Doors, Trunk, Fog, Hazards)
-        val actionOverlay = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(12, 10, 12, 0)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP
-            )
-
-            addView(createQuickActionPill("DOORS") {
-                val anyOpen = CanBusService.vehicleState.doorFL || CanBusService.vehicleState.doorFR
-                val next = !anyOpen
-                CanBusService.vehicleState.doorFL = next
-                CanBusService.vehicleState.doorFR = next
-                cruzeViewport.setDoor("FL", next)
-                cruzeViewport.setDoor("FR", next)
-                CanBusService.notifyUpdate()
-            })
-
-            addView(createQuickActionPill("TRUNK") {
-                CanBusService.popTrunk(this@CruzeLauncherActivity)
-                cruzeViewport.setDoor("trunk", CanBusService.vehicleState.trunkOpen)
-            })
-
-            addView(createQuickActionPill("LIGHTS") {
-                val next = !CanBusService.vehicleState.headlightsOn
-                CanBusService.vehicleState.headlightsOn = next
-                cruzeViewport.setLights(next, brakeOn = false, leftSignal = false, rightSignal = false)
-                CanBusService.notifyUpdate()
-            })
-
-            addView(createQuickActionPill("FOG") {
-                CanBusService.toggleFogLights(this@CruzeLauncherActivity)
-            })
-
-            addView(createQuickActionPill("HAZARD") {
-                CanBusService.toggleHazardLights(this@CruzeLauncherActivity)
-            })
-        }
-        stageContainer.addView(actionOverlay)
-
         return stageContainer
     }
 
@@ -645,14 +634,21 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(0, 4, 0, 4)
 
-                    val lockBtn = createTactileButton("🔒 Lock") {
+                    bcmLockBtn = createTactileButton("🔒 Lock") {
                         CanBusService.toggleDoorLocks(this@CruzeLauncherActivity)
                     }
-                    val trunkBtn = createTactileButton("🚗 Trunk") {
+                    bcmTrunkBtn = createTactileButton("🚗 Trunk") {
+                        bcmTrunkBtn.text = "🚗 Popping..."
+                        bcmTrunkBtn.setTextColor(Color.parseColor("#00E5FF"))
                         CanBusService.popTrunk(this@CruzeLauncherActivity)
+                        bcmTrunkBtn.postDelayed({
+                            val isOpen = CanBusService.vehicleState.trunkOpen
+                            bcmTrunkBtn.text = if (isOpen) "🚗 Trunk Open" else "🚗 Trunk"
+                            bcmTrunkBtn.setTextColor(if (isOpen) Color.parseColor("#EF4444") else Color.WHITE)
+                        }, 1200)
                     }
-                    addView(lockBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
-                    addView(trunkBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
+                    addView(bcmLockBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
+                    addView(bcmTrunkBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
                 }
                 addView(btnRow1)
 
@@ -660,14 +656,14 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                     orientation = LinearLayout.HORIZONTAL
                     setPadding(0, 2, 0, 4)
 
-                    val fogBtn = createTactileButton("💡 Fog Lamps") {
+                    bcmFogBtn = createTactileButton("💡 Fog Lamps") {
                         CanBusService.toggleFogLights(this@CruzeLauncherActivity)
                     }
-                    val hazardBtn = createTactileButton("⚠ Hazards") {
+                    bcmHazardBtn = createTactileButton("⚠ Hazards") {
                         CanBusService.toggleHazardLights(this@CruzeLauncherActivity)
                     }
-                    addView(fogBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
-                    addView(hazardBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
+                    addView(bcmFogBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
+                    addView(bcmHazardBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
                 }
                 addView(btnRow2)
 
@@ -736,16 +732,34 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
             }
             addView(title)
 
-            val unitSwitch = TextView(this@CruzeLauncherActivity).apply {
-                text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C (METRIC)" else "UNIT: °F (IMPERIAL)"
-                setTextColor(Color.parseColor("#94A3B8"))
+            val consoleToggleBtn = TextView(this@CruzeLauncherActivity).apply {
+                text = if (isCompactConsoleMode) "CONSOLE: COMPACT" else "CONSOLE: FULL"
+                setTextColor(Color.parseColor("#00E5FF"))
                 textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
                 setPadding(10, 4, 10, 4)
                 background = createPillDrawable("#15202B", "#00E5FF")
                 setOnClickListener {
+                    isCompactConsoleMode = !isCompactConsoleMode
+                    hvacModeStrip.visibility = if (isCompactConsoleMode) View.GONE else View.VISIBLE
+                    text = if (isCompactConsoleMode) "CONSOLE: COMPACT" else "CONSOLE: FULL"
+                }
+            }
+            addView(consoleToggleBtn)
+
+            val unitSwitch = TextView(this@CruzeLauncherActivity).apply {
+                text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C" else "UNIT: °F"
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 10f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(8, 4, 8, 4)
+                background = createPillDrawable("#15202B", "#94A3B8")
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(6, 0, 0, 0)
+                }
+                setOnClickListener {
                     ClimateController.toggleMetricUnits(this@CruzeLauncherActivity)
-                    text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C (METRIC)" else "UNIT: °F (IMPERIAL)"
+                    text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C" else "UNIT: °F"
                 }
             }
             addView(unitSwitch)
@@ -753,9 +767,10 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         consoleLayout.addView(titleRow)
 
         // ROW A: MASTER HVAC MODE STRIP (OFF, DUAL, A/C, MAX A/C, RECIRC, AUTO, VENT, DEFROST)
-        val modeStrip = LinearLayout(this).apply {
+        hvacModeStrip = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            visibility = if (isCompactConsoleMode) View.GONE else View.VISIBLE
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 dpToPx(44)
@@ -801,7 +816,7 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
             }
             addView(frontDefrostBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.2f).apply { setMargins(2, 0, 2, 0) })
         }
-        consoleLayout.addView(modeStrip)
+        consoleLayout.addView(hvacModeStrip)
 
         // ROW B: COMFORT PODS (Driver Temp, Heated Seats, Blower Speed, Passenger Temp, Volume)
         val comfortRow = LinearLayout(this).apply {
@@ -1131,6 +1146,21 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         centralLockBadge.text = if (state.doorsLocked) "⚡ CRUZE LTZ  🔒" else "⚡ CRUZE LTZ  🔓"
         centralLockBadge.setTextColor(if (state.doorsLocked) Color.parseColor("#00E5FF") else Color.parseColor("#F59E0B"))
 
+        if (::bcmLockBtn.isInitialized) {
+            bcmLockBtn.text = if (state.doorsLocked) "🔒 Locked" else "🔓 Unlocked"
+            bcmLockBtn.setTextColor(if (state.doorsLocked) Color.parseColor("#00E5FF") else Color.parseColor("#F59E0B"))
+        }
+        if (::bcmTrunkBtn.isInitialized) {
+            bcmTrunkBtn.text = if (state.trunkOpen) "🚗 Trunk Open" else "🚗 Trunk"
+            bcmTrunkBtn.setTextColor(if (state.trunkOpen) Color.parseColor("#EF4444") else Color.WHITE)
+        }
+        if (::bcmFogBtn.isInitialized) {
+            bcmFogBtn.setTextColor(if (state.fogLightsOn) Color.parseColor("#00E5FF") else Color.WHITE)
+        }
+        if (::bcmHazardBtn.isInitialized) {
+            bcmHazardBtn.setTextColor(if (state.hazardLightsOn) Color.parseColor("#EF4444") else Color.WHITE)
+        }
+
         cruzeViewport.setSpeed(state.speedMph)
         cruzeViewport.setSteeringAngle(state.steeringAngleDeg)
         cruzeViewport.setLights(state.headlightsOn, brakeOn = false, leftSignal = state.turnSignalLeft, rightSignal = state.turnSignalRight)
@@ -1199,6 +1229,41 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                 btn.background = createButtonDrawable("#1A202C", "#2D3748", 6f)
             }
         }
+    }
+
+    private fun showDockSetupDialog() {
+        val msg = """
+        To make the factory bottom AC & navigation dock disappear and give CruzeOS 100% full screen control:
+
+        ⚡ OPTION 1: 10-Second Head Unit Setting (Permanent)
+        1. Open Car Settings ➔ Factory Settings
+           (Common passcodes: 8888, 3368, 123456, or 0000)
+        2. Tap 'Protocol Settings' or 'CAN Box Settings'
+        3. Find 'Air Conditioner Display' or 'POP AIR SET'
+           ➔ Change from OPEN to CLOSED / OFF
+        4. (Optional) Under 'Customized Setting', set 'Instrument panel window height' to 0 or 1
+        5. Tap Save and Reboot head unit!
+
+        📱 OPTION 2: One-Click Phone USB / Wi-Fi Fix
+        1. Open GoatsInstaller on your phone
+        2. Connect via USB or Wi-Fi to your head unit
+        3. Tap '🔓 Unlock Fullscreen (Hide Bottom Dock)'
+        (This sends ADB commands to force immersive full screen globally!)
+        """.trimIndent()
+
+        AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("🚗 Remove Factory Bottom Dock")
+            .setMessage(msg)
+            .setPositiveButton("Open Factory Settings") { _, _ ->
+                CanBusService.openNativeCarSettings(this)
+            }
+            .setNeutralButton("Test Fullscreen Hide") { _, _ ->
+                applyFullscreenFlags()
+                CanBusService.hideFactoryBottomBar(this)
+                Toast.makeText(this, "Suppression broadcasts sent!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     // ==========================================

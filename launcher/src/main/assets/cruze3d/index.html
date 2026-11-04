@@ -213,34 +213,60 @@
       var currentSteeringAngle = 0;
       var currentSpeedMph = 0;
       var paintMaterial = null;
+      var lastW = 0, lastH = 0;
 
       init();
 
+      function updateViewportDimensions() {
+        var container = document.getElementById('canvas-container');
+        var w = container ? (container.clientWidth || container.offsetWidth) : 0;
+        var h = container ? (container.clientHeight || container.offsetHeight) : 0;
+        if (!w || w < 20) w = window.innerWidth || 360;
+        if (!h || h < 20) h = window.innerHeight || 240;
+
+        if (w !== lastW || h !== lastH) {
+          lastW = w;
+          lastH = h;
+          if (camera && renderer) {
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h, false);
+          }
+        }
+      }
+
       function init() {
         var container = document.getElementById('canvas-container');
-        var width = container.clientWidth || window.innerWidth;
-        var height = container.clientHeight || window.innerHeight;
+        var width = (container && container.clientWidth) ? container.clientWidth : (window.innerWidth || 360);
+        var height = (container && container.clientHeight) ? container.clientHeight : (window.innerHeight || 240);
 
         scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x0A0C10, 0.04);
+        // Remove heavy fog that could obscure car on mobile Mali GPUs
+        scene.background = null;
 
         camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
         camera.position.set(-3.2, 1.8, 3.6);
 
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-        renderer.setSize(width, height);
+        try {
+          renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "default" });
+        } catch (e) {
+          renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
+        }
+        renderer.setSize(width, height, false);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-        renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        renderer.toneMappingExposure = 1.15;
-        renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+        // Use safe tone mapping for Mali-400 / Mali-T720 / Mali-G52
+        if (THREE.LinearToneMapping) {
+          renderer.toneMapping = THREE.LinearToneMapping;
+        }
+
         container.appendChild(renderer.domElement);
 
         controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
-        controls.dampingFactor = 0.07;
-        controls.minDistance = 2.0;
-        controls.maxDistance = 8.5;
+        controls.dampingFactor = 0.08;
+        controls.minDistance = 1.8;
+        controls.maxDistance = 8.0;
         controls.maxPolarAngle = Math.PI / 2 + 0.03;
         controls.target.set(0, 0.65, 0);
 
@@ -250,6 +276,11 @@
         setupRaycasting(renderer.domElement);
 
         window.addEventListener('resize', onWindowResize, false);
+        if (window.ResizeObserver && container) {
+          try {
+            new ResizeObserver(function() { updateViewportDimensions(); }).observe(container);
+          } catch (ignored) {}
+        }
 
         // FRAME 0: Render procedural Cruze LTZ immediately so user sees the 3D car in <16ms!
         createProceduralCruze();
@@ -262,21 +293,19 @@
       }
 
       function setupLighting() {
-        var keySun = new THREE.DirectionalLight(0xFFFFFF, 2.4);
-        keySun.position.set(4, 9, 5);
-        keySun.castShadow = true;
-        keySun.shadow.mapSize.width = 1024;
-        keySun.shadow.mapSize.height = 1024;
+        // Universal bright lighting that works reliably across all mobile GPUs
+        var ambient = new THREE.AmbientLight(0xFFFFFF, 1.5);
+        scene.add(ambient);
+
+        var keySun = new THREE.DirectionalLight(0xFFFFFF, 2.0);
+        keySun.position.set(4, 8, 5);
         scene.add(keySun);
 
-        var rimLight = new THREE.DirectionalLight(0x80D8FF, 1.5);
-        rimLight.position.set(-5, 4, -4);
-        scene.add(rimLight);
+        var fillLight = new THREE.DirectionalLight(0x90CAF9, 1.2);
+        fillLight.position.set(-5, 4, -4);
+        scene.add(fillLight);
 
-        var hemi = new THREE.HemisphereLight(0xCBD5E1, 0x0F172A, 1.1);
-        scene.add(hemi);
-
-        ambientCabinLight = new THREE.PointLight(0x00E5FF, 1.2, 2.0);
+        ambientCabinLight = new THREE.PointLight(0x00E5FF, 1.4, 2.5);
         ambientCabinLight.position.set(0, 0.75, 0.2);
         scene.add(ambientCabinLight);
       }
@@ -290,7 +319,6 @@
         });
         var podium = new THREE.Mesh(podiumGeom, podiumMat);
         podium.position.y = -0.04;
-        podium.receiveShadow = true;
         scene.add(podium);
 
         var floorGeom = new THREE.PlaneGeometry(16, 16);
@@ -302,7 +330,6 @@
         var floor = new THREE.Mesh(floorGeom, floorMat);
         floor.rotation.x = -Math.PI / 2;
         floor.position.y = -0.08;
-        floor.receiveShadow = true;
         scene.add(floor);
       }
 
@@ -412,45 +439,65 @@
         }
       }
 
+      function enhanceMaterial(mat) {
+        if (!mat) return;
+        mat.side = THREE.DoubleSide;
+        if (mat.name === 'cruze_body' || mat.name === 'Body') {
+          paintMaterial = mat;
+          mat.color.set('#F0F3F6');
+          mat.roughness = 0.22;
+          mat.metalness = 0.85;
+        } else if (mat.name.indexOf('glass') !== -1 || mat.name.indexOf('window') !== -1) {
+          mat.transparent = true;
+          mat.opacity = 0.45;
+          mat.roughness = 0.08;
+          mat.metalness = 0.3;
+        } else if (mat.name.indexOf('chrome') !== -1) {
+          mat.metalness = 0.95;
+          mat.roughness = 0.1;
+        } else if (mat.name.indexOf('tyre') !== -1 || mat.name.indexOf('tire') !== -1) {
+          mat.roughness = 0.85;
+          mat.metalness = 0.1;
+        }
+      }
+
       function loadCruzeFbx() {
         if (!FBXLoader) return;
-        var loader = new FBXLoader();
+        var manager = new THREE.LoadingManager();
+        manager.setURLModifier(function() { return ''; });
+        var loader = new FBXLoader(manager);
         loader.load('./cruze.fbx', function(fbx) {
-          if (!fbx || !fbx.children) return;
+          if (!fbx) return;
 
-          var fbxBody = fbx.children.find(function(c) { return c.name === 'Body'; });
-          var fbxSteering = fbx.children.find(function(c) { return c.name === 'SteeringWheel'; });
-          var w1 = fbx.children.find(function(c) { return c.name === 'Wheel1'; });
-          var w2 = fbx.children.find(function(c) { return c.name === 'Wheel2'; });
-          var w3 = fbx.children.find(function(c) { return c.name === 'Wheel3'; });
-          var w4 = fbx.children.find(function(c) { return c.name === 'Wheel4'; });
+          // The Cruze FBX is modeled in centimeters (457cm x 208cm x 163cm).
+          // Scale by 0.01 to match exact real-world automotive meters (4.57m x 2.08m x 1.63m).
+          fbx.scale.setScalar(0.01);
+          fbx.position.set(0, 0, 0);
 
-          if (fbxBody) {
-            // Replace procedural body with detailed FBX body
-            if (bodyMesh) carGroup.remove(bodyMesh);
-            fbxBody.material = paintMaterial;
-            fbxBody.castShadow = true;
-            fbxBody.receiveShadow = true;
-            bodyMesh = fbxBody;
-            carGroup.add(bodyMesh);
+          wheels = [];
+          fbx.traverse(function(c) {
+            if (c.name === 'SteeringWheel') steeringWheel = c;
+            if (c.name && c.name.startsWith('Wheel')) wheels.push(c);
+            if (c.isMesh) {
+              c.castShadow = false;
+              c.receiveShadow = false;
+              if (Array.isArray(c.material)) {
+                c.material.forEach(enhanceMaterial);
+              } else if (c.material) {
+                enhanceMaterial(c.material);
+              }
+            }
+          });
+
+          // Smoothly replace procedural placeholder with detailed 2012 Cruze LTZ FBX model
+          if (carGroup) {
+            scene.remove(carGroup);
           }
+          carGroup = fbx;
+          scene.add(carGroup);
 
-          if (fbxSteering) {
-            steeringWheel = fbxSteering.clone();
-            carGroup.add(steeringWheel);
-          }
-
-          var fbxWheels = [w1, w2, w3, w4];
-          if (fbxWheels[0] && fbxWheels[1]) {
-            wheels.forEach(function(w) { carGroup.remove(w); });
-            wheels = [];
-            fbxWheels.forEach(function(w, idx) {
-              if (!w) return;
-              var wheelObj = w.clone();
-              wheelObj.name = "Wheel_" + idx;
-              wheels.push(wheelObj);
-              carGroup.add(wheelObj);
-            });
+          if (window.AndroidCar && window.AndroidCar.onModelLoaded) {
+            window.AndroidCar.onModelLoaded();
           }
         }, null, function(err) {
           console.warn("FBX load notice (retained procedural vehicle):", err);
@@ -602,6 +649,8 @@
 
       function animate() {
         requestAnimationFrame(animate);
+
+        updateViewportDimensions();
 
         currentSteeringAngle = THREE.MathUtils.lerp(currentSteeringAngle, targetSteeringAngle, 0.15);
         if (steeringWheel) steeringWheel.rotation.y = currentSteeringAngle;

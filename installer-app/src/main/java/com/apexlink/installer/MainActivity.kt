@@ -532,6 +532,81 @@ class MainActivity : Activity() {
 
         rootLayout.addView(deployCard)
 
+        // --- System Tweaks / Dock Removal Section ---
+        val tweakCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#1A1D24"))
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1A1D24"))
+                cornerRadius = 16f
+                setStroke(2, Color.parseColor("#37474F"))
+            }
+            setPadding(20, 16, 20, 16)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 14) }
+        }
+
+        val tweakTitle = TextView(this).apply {
+            text = "🚗 Head Unit Screen & CAN Optimization"
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#00E5FF"))
+            setPadding(0, 0, 0, 8)
+        }
+        tweakCard.addView(tweakTitle)
+
+        val tweakDesc = TextView(this).apply {
+            text = "Permanently remove the factory bottom AC dock (force fullscreen) and unlock raw hardware CAN permissions."
+            textSize = 11.5f
+            setTextColor(Color.parseColor("#B0BEC5"))
+            setPadding(0, 0, 0, 10)
+        }
+        tweakCard.addView(tweakDesc)
+
+        val removeDockUsbBtn = Button(this).apply {
+            text = "🔓 Remove Bottom Dock via USB"
+            textSize = 13.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#D81B60"))
+                cornerRadius = 12f
+            }
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 6) }
+            setOnClickListener {
+                runDockRemoval(useUsb = true)
+            }
+        }
+        tweakCard.addView(removeDockUsbBtn)
+
+        val removeDockWifiBtn = Button(this).apply {
+            text = "📶 Remove Bottom Dock via Wi-Fi"
+            textSize = 13.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#455A64"))
+                cornerRadius = 12f
+            }
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setOnClickListener {
+                runDockRemoval(useUsb = false)
+            }
+        }
+        tweakCard.addView(removeDockWifiBtn)
+
+        rootLayout.addView(tweakCard)
+
         // --- Progress Section ---
         val progressRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -872,6 +947,70 @@ class MainActivity : Activity() {
         }
 
         executeTargetDeploy(TcpAdbTransport(ip, port), targetMode, disableZlink)
+    }
+
+    private fun runDockRemoval(useUsb: Boolean) {
+        if (useUsb) {
+            val detection = UsbAdbManager.detectUsbConnection(this)
+            when (detection.mode) {
+                UsbAdbManager.UsbMode.DIRECT_ADB_DEVICE -> {
+                    val device = detection.device ?: return
+                    if (!UsbAdbManager.hasPermission(this, device)) {
+                        UsbAdbManager.requestPermission(this, device) { granted ->
+                            mainHandler.post {
+                                if (granted) {
+                                    startDockRemovalExecution(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device))
+                                } else {
+                                    appendLog("❌ USB permission denied.")
+                                }
+                            }
+                        }
+                    } else {
+                        startDockRemovalExecution(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device))
+                    }
+                }
+                UsbAdbManager.UsbMode.USB_TETHERING -> {
+                    val ip = detection.tetherIp ?: "192.168.42.129"
+                    startDockRemovalExecution(TcpAdbTransport(ip, 5555))
+                }
+                else -> {
+                    appendLog("❌ Plug USB cable between phone and car head unit (or turn on USB Tethering).")
+                    Toast.makeText(this, "Connect USB cable to car head unit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        } else {
+            val ip = ipEditText.text.toString().trim()
+            val port = portEditText.text.toString().trim().toIntOrNull() ?: 5555
+            if (ip.isEmpty()) {
+                Toast.makeText(this, "Please enter Head Unit IP address", Toast.LENGTH_SHORT).show()
+                return
+            }
+            startDockRemovalExecution(TcpAdbTransport(ip, port))
+        }
+    }
+
+    private fun startDockRemovalExecution(transport: AdbTransport) {
+        setBusyState(true)
+        appendLog("🚀 Running Bottom Dock Removal & CAN Permissions via ${transport.name}...")
+        provisioner.executeDockRemoval(transport, object : HeadUnitProvisioner.Listener {
+            override fun onLog(message: String) {
+                runOnUiThread { appendLog(message) }
+            }
+            override fun onProgress(percent: Int) {
+                runOnUiThread { updateProgress(percent, "Optimizing screen...") }
+            }
+            override fun onCompleted(success: Boolean) {
+                runOnUiThread {
+                    setBusyState(false)
+                    if (success) {
+                        appendLog("🎉 DONE! Factory bottom dock removed. CruzeOS now has 100% fullscreen control.")
+                        Toast.makeText(this@MainActivity, "Bottom dock removed successfully!", Toast.LENGTH_LONG).show()
+                    } else {
+                        appendLog("❌ Failed to remove dock. Check ADB connection.")
+                    }
+                }
+            }
+        })
     }
 
     private fun executeTargetDeploy(transport: AdbTransport, targetMode: Int, disableZlink: Boolean) {

@@ -165,6 +165,54 @@ class HeadUnitProvisioner(private val context: Context) {
     }
 
     /**
+     * Executes ADB configuration to remove factory bottom AC / navigation dock
+     * and unlock full hardware CAN permissions.
+     */
+    fun executeDockRemoval(transport: AdbTransport, listener: Listener) {
+        Thread {
+            val adb = AdbClient(transport)
+            try {
+                listener.onLog("Connecting to Head Unit via ${transport.name}...")
+                if (!adb.connect(6000)) {
+                    val helpTip = if (transport.isUsb) {
+                        "❌ USB connection failed! Ensure USB Debugging is ON in Head Unit Factory Settings."
+                    } else {
+                        "❌ Wi-Fi connection failed! Ensure port 5555 is open."
+                    }
+                    listener.onLog(helpTip)
+                    listener.onCompleted(false)
+                    return@Thread
+                }
+                listener.onLog("✅ Connected to Head Unit ADB!")
+
+                listener.onLog("🔓 Enforcing 100% Global Immersive Fullscreen (Hiding bottom dock)...")
+                adb.executeShell("settings put global policy_control immersive.full=*")
+                adb.executeShell("settings put global policy_control immersive.navigation=*")
+                adb.executeShell("settings put global policy_control immersive.status=*")
+
+                listener.onLog("⚡ Unlocking Hardware CAN-Bus & Serial R/W permissions...")
+                adb.executeShell("chmod 666 /dev/ttyMT* /dev/ttyS* /dev/mcu* /dev/ts_mcu* /dev/can* 2>/dev/null")
+                adb.executeShell("pm grant com.apexlink.cruze android.permission.WRITE_SECURE_SETTINGS 2>/dev/null")
+                adb.executeShell("pm grant com.apexlink.cruze android.permission.SYSTEM_ALERT_WINDOW 2>/dev/null")
+
+                listener.onLog("🚫 Sending suppression broadcasts to factory bottom AC dock...")
+                adb.executeShell("am broadcast -a com.ts.air.hide 2>/dev/null")
+                adb.executeShell("am broadcast -a com.xyauto.aircondition.HIDE 2>/dev/null")
+                adb.executeShell("am broadcast -a com.fyt.air.hide 2>/dev/null")
+                adb.executeShell("am broadcast -a com.syu.air.hide 2>/dev/null")
+
+                listener.onLog("🎉 SUCCESS: Bottom dock disabled and hardware CAN permissions granted!")
+                listener.onCompleted(true)
+            } catch (e: Exception) {
+                listener.onLog("❌ Error: ${e.message}")
+                listener.onCompleted(false)
+            } finally {
+                adb.close()
+            }
+        }.start()
+    }
+
+    /**
      * Backward-compatible helper for legacy Wi-Fi installs.
      */
     fun provision(
