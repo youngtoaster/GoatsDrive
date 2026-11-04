@@ -9,6 +9,7 @@ class HeadUnitProvisioner(private val context: Context) {
     companion object {
         private const val TAG = "GD_Provisioner"
         const val GOATSDRIVE_PACKAGE = "com.apexlink.projection"
+        const val CRUZEOS_PACKAGE = "com.apexlink.cruzeos"
         const val ZLINK_PACKAGE = "com.zjinnova.zlink"
         private const val REMOTE_TMP_APK = "/data/local/tmp/staged_install.apk"
     }
@@ -27,6 +28,7 @@ class HeadUnitProvisioner(private val context: Context) {
         val appTitle: String = "GoatsDrive",
         val packageName: String = GOATSDRIVE_PACKAGE,
         val isGoatsDrive: Boolean = true,
+        val isCruzeOs: Boolean = false,
         val disableZlink: Boolean = false,
         val launchAfterInstall: Boolean = true
     )
@@ -129,6 +131,11 @@ class HeadUnitProvisioner(private val context: Context) {
                     adb.executeShell("dumpsys deviceidle whitelist +${task.packageName}")
                     adb.executeShell("pm grant ${task.packageName} android.permission.ACCESS_FINE_LOCATION 2>/dev/null")
                     adb.executeShell("pm grant ${task.packageName} android.permission.NEARBY_WIFI_DEVICES 2>/dev/null")
+                } else if (task.isCruzeOs) {
+                    listener.onLog("🔐 Granting CruzeOS overlay & home launcher permissions...")
+                    adb.executeShell("appops set ${task.packageName} SYSTEM_ALERT_WINDOW allow")
+                    adb.executeShell("dumpsys deviceidle whitelist +${task.packageName}")
+                    adb.executeShell("cmd package set-home-activity ${task.packageName}/com.apexlink.cruze.CruzeLauncherActivity 2>/dev/null")
                 } else {
                     adb.executeShell("appops set ${task.packageName} SYSTEM_ALERT_WINDOW allow 2>/dev/null")
                 }
@@ -138,6 +145,8 @@ class HeadUnitProvisioner(private val context: Context) {
                     listener.onLog("🚀 Launching ${task.appTitle} on Head Unit screen...")
                     if (task.isGoatsDrive) {
                         adb.executeShell("am start -n ${task.packageName}/.MainActivity")
+                    } else if (task.isCruzeOs) {
+                        adb.executeShell("am start -n ${task.packageName}/com.apexlink.cruze.CruzeLauncherActivity")
                     } else {
                         adb.executeShell("monkey -p ${task.packageName} -c android.intent.category.LAUNCHER 1 2>/dev/null")
                     }

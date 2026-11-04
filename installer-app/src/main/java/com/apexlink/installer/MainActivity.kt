@@ -30,7 +30,8 @@ class MainActivity : Activity() {
     companion object {
         private const val REQUEST_PICK_APK = 1001
         private const val MODE_GOATSDRIVE = 0
-        private const val MODE_CUSTOM_APK = 1
+        private const val MODE_CRUZEOS = 1
+        private const val MODE_CUSTOM_APK = 2
     }
 
     private var activeTargetMode = MODE_GOATSDRIVE
@@ -46,14 +47,22 @@ class MainActivity : Activity() {
 
     // UI - Mode Toggle
     private lateinit var tabGoatsDrive: Button
+    private lateinit var tabCruzeOs: Button
     private lateinit var tabCustomApk: Button
     private lateinit var goatsDriveContainer: LinearLayout
+    private lateinit var cruzeOsContainer: LinearLayout
     private lateinit var customApkContainer: LinearLayout
 
     // UI - GoatsDrive Payload
     private lateinit var updateStatusText: TextView
     private lateinit var checkUpdatesButton: Button
     private lateinit var zlinkCheckBox: CheckBox
+
+    // UI - CruzeOS Payload
+    private lateinit var cruzeOsUpdateStatusText: TextView
+    private lateinit var cruzeOsCheckUpdatesButton: Button
+    private lateinit var cruzeOsHomeCheckBox: CheckBox
+    private var cruzeOsReleaseInfo: ApkUpdateManager.ReleaseInfo? = null
 
     // UI - Custom APK Payload
     private lateinit var pickApkButton: Button
@@ -160,19 +169,30 @@ class MainActivity : Activity() {
         }
 
         tabGoatsDrive = Button(this).apply {
-            text = "⚡ GoatsDrive Receiver"
-            textSize = 12.5f
+            text = "⚡ GoatsDrive"
+            textSize = 11.5f
             typeface = Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                marginEnd = 6
+                marginEnd = 4
             }
             setOnClickListener { setTargetMode(MODE_GOATSDRIVE) }
         }
         modeToggleLayout.addView(tabGoatsDrive)
 
+        tabCruzeOs = Button(this).apply {
+            text = "🚗 CruzeOS 3D"
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = 4
+            }
+            setOnClickListener { setTargetMode(MODE_CRUZEOS) }
+        }
+        modeToggleLayout.addView(tabCruzeOs)
+
         tabCustomApk = Button(this).apply {
-            text = "📁 Custom APK from Phone"
-            textSize = 12.5f
+            text = "📁 Custom APK"
+            textSize = 11.5f
             typeface = Typeface.DEFAULT_BOLD
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { setTargetMode(MODE_CUSTOM_APK) }
@@ -238,6 +258,58 @@ class MainActivity : Activity() {
         }
         goatsDriveContainer.addView(zlinkCheckBox)
         targetCard.addView(goatsDriveContainer)
+
+        // Panel 2: CruzeOS 3D Launcher Options
+        cruzeOsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+
+        val cruzeHeaderRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(0, 0, 0, 6) }
+        }
+
+        val cruzeTitle = TextView(this).apply {
+            text = "🚗 CruzeOS 3D Launcher (Chevy Cruze LTZ):"
+            textSize = 13.5f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#00E5FF"))
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        cruzeHeaderRow.addView(cruzeTitle)
+
+        cruzeOsCheckUpdatesButton = Button(this).apply {
+            text = "🔄 Check GitHub"
+            textSize = 11f
+            setTextColor(Color.parseColor("#80D8FF"))
+            setBackgroundColor(Color.TRANSPARENT)
+            setPadding(8, 4, 8, 4)
+            setOnClickListener { checkForCruzeUpdates(manual = true) }
+        }
+        cruzeHeaderRow.addView(cruzeOsCheckUpdatesButton)
+        cruzeOsContainer.addView(cruzeHeaderRow)
+
+        cruzeOsUpdateStatusText = TextView(this).apply {
+            text = "Real-time 3D model, GM Delta CAN-bus, dual-zone climate HUD"
+            textSize = 12f
+            setTextColor(Color.parseColor("#B0BEC5"))
+            setPadding(0, 0, 0, 8)
+        }
+        cruzeOsContainer.addView(cruzeOsUpdateStatusText)
+
+        cruzeOsHomeCheckBox = CheckBox(this).apply {
+            text = "Set as default Car Home Launcher (cmd package set-home-activity)"
+            isChecked = true
+            setTextColor(Color.parseColor("#81C784"))
+            textSize = 12f
+        }
+        cruzeOsContainer.addView(cruzeOsHomeCheckBox)
+        targetCard.addView(cruzeOsContainer)
 
         // Panel 2: Custom APK Sideload Options
         customApkContainer = LinearLayout(this).apply {
@@ -544,41 +616,60 @@ class MainActivity : Activity() {
 
     private fun setTargetMode(mode: Int) {
         activeTargetMode = mode
-        if (mode == MODE_GOATSDRIVE) {
-            tabGoatsDrive.background = GradientDrawable().apply {
-                setColor(Color.parseColor("#2E7D32"))
-                cornerRadius = 10f
-            }
-            tabGoatsDrive.setTextColor(Color.WHITE)
 
-            tabCustomApk.background = GradientDrawable().apply {
+        // Reset all tabs to inactive
+        val inactiveBg = {
+            GradientDrawable().apply {
                 setColor(Color.parseColor("#2A2A2A"))
                 cornerRadius = 10f
             }
-            tabCustomApk.setTextColor(Color.parseColor("#B0BEC5"))
+        }
+        tabGoatsDrive.background = inactiveBg()
+        tabGoatsDrive.setTextColor(Color.parseColor("#B0BEC5"))
+        tabCruzeOs.background = inactiveBg()
+        tabCruzeOs.setTextColor(Color.parseColor("#B0BEC5"))
+        tabCustomApk.background = inactiveBg()
+        tabCustomApk.setTextColor(Color.parseColor("#B0BEC5"))
 
-            goatsDriveContainer.visibility = View.VISIBLE
-            customApkContainer.visibility = View.GONE
-            installUsbButton.text = "🔌 Install GoatsDrive via USB"
-            installWifiButton.text = "⚡ Install GoatsDrive via Wi-Fi"
-        } else {
-            tabGoatsDrive.background = GradientDrawable().apply {
-                setColor(Color.parseColor("#2A2A2A"))
-                cornerRadius = 10f
+        goatsDriveContainer.visibility = View.GONE
+        cruzeOsContainer.visibility = View.GONE
+        customApkContainer.visibility = View.GONE
+
+        when (mode) {
+            MODE_GOATSDRIVE -> {
+                tabGoatsDrive.background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#2E7D32"))
+                    cornerRadius = 10f
+                }
+                tabGoatsDrive.setTextColor(Color.WHITE)
+                goatsDriveContainer.visibility = View.VISIBLE
+                installUsbButton.text = "🔌 Install GoatsDrive via USB"
+                installWifiButton.text = "⚡ Install GoatsDrive via Wi-Fi"
             }
-            tabGoatsDrive.setTextColor(Color.parseColor("#B0BEC5"))
-
-            tabCustomApk.background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1565C0"))
-                cornerRadius = 10f
+            MODE_CRUZEOS -> {
+                tabCruzeOs.background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#00838F"))
+                    cornerRadius = 10f
+                }
+                tabCruzeOs.setTextColor(Color.WHITE)
+                cruzeOsContainer.visibility = View.VISIBLE
+                installUsbButton.text = "🔌 Install CruzeOS 3D via USB"
+                installWifiButton.text = "⚡ Install CruzeOS 3D via Wi-Fi"
+                if (cruzeOsReleaseInfo == null) {
+                    checkForCruzeUpdates(manual = false)
+                }
             }
-            tabCustomApk.setTextColor(Color.WHITE)
-
-            goatsDriveContainer.visibility = View.GONE
-            customApkContainer.visibility = View.VISIBLE
-            val appLabel = if (customApkTitle.isNotEmpty()) customApkTitle else "Custom App"
-            installUsbButton.text = "🔌 Sideload $appLabel via USB"
-            installWifiButton.text = "⚡ Sideload $appLabel via Wi-Fi"
+            MODE_CUSTOM_APK -> {
+                tabCustomApk.background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#1565C0"))
+                    cornerRadius = 10f
+                }
+                tabCustomApk.setTextColor(Color.WHITE)
+                customApkContainer.visibility = View.VISIBLE
+                val appLabel = if (customApkTitle.isNotEmpty()) customApkTitle else "Custom App"
+                installUsbButton.text = "🔌 Sideload $appLabel via USB"
+                installWifiButton.text = "⚡ Sideload $appLabel via Wi-Fi"
+            }
         }
     }
 
@@ -712,22 +803,21 @@ class MainActivity : Activity() {
 
     private fun startInstallation(useUsb: Boolean) {
         val disableZlink = zlinkCheckBox.isChecked
-        val isGoatsDrive = (activeTargetMode == MODE_GOATSDRIVE)
 
-        if (!isGoatsDrive && customApkUri == null) {
+        if (activeTargetMode == MODE_CUSTOM_APK && customApkUri == null) {
             Toast.makeText(this, "Please select an APK file from your phone first!", Toast.LENGTH_LONG).show()
             openApkFilePicker()
             return
         }
 
         if (useUsb) {
-            handleUsbInstallation(isGoatsDrive, disableZlink)
+            handleUsbInstallation(activeTargetMode, disableZlink)
         } else {
-            handleWifiInstallation(isGoatsDrive, disableZlink)
+            handleWifiInstallation(activeTargetMode, disableZlink)
         }
     }
 
-    private fun handleUsbInstallation(isGoatsDrive: Boolean, disableZlink: Boolean) {
+    private fun handleUsbInstallation(targetMode: Int, disableZlink: Boolean) {
         val detection = UsbAdbManager.detectUsbConnection(this)
 
         when (detection.mode) {
@@ -740,7 +830,7 @@ class MainActivity : Activity() {
                     UsbAdbManager.requestPermission(this, device) { granted ->
                         mainHandler.post {
                             if (granted) {
-                                executeTargetDeploy(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device), isGoatsDrive, disableZlink)
+                                executeTargetDeploy(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device), targetMode, disableZlink)
                             } else {
                                 appendLog("❌ USB permission denied by user.")
                                 Toast.makeText(this, "USB permission denied", Toast.LENGTH_SHORT).show()
@@ -748,14 +838,14 @@ class MainActivity : Activity() {
                         }
                     }
                 } else {
-                    executeTargetDeploy(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device), isGoatsDrive, disableZlink)
+                    executeTargetDeploy(UsbAdbTransport(getSystemService(Context.USB_SERVICE) as UsbManager, device), targetMode, disableZlink)
                 }
             }
 
             UsbAdbManager.UsbMode.USB_TETHERING -> {
                 val ip = detection.tetherIp ?: "192.168.42.129"
                 appendLog("🔌 Connecting over active USB Tether network ($ip:5555)...")
-                executeTargetDeploy(TcpAdbTransport(ip, 5555), isGoatsDrive, disableZlink)
+                executeTargetDeploy(TcpAdbTransport(ip, 5555), targetMode, disableZlink)
             }
 
             UsbAdbManager.UsbMode.USB_CABLE_ONLY -> {
@@ -772,7 +862,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun handleWifiInstallation(isGoatsDrive: Boolean, disableZlink: Boolean) {
+    private fun handleWifiInstallation(targetMode: Int, disableZlink: Boolean) {
         val ip = ipEditText.text.toString().trim()
         val port = portEditText.text.toString().trim().toIntOrNull() ?: 5555
 
@@ -781,84 +871,147 @@ class MainActivity : Activity() {
             return
         }
 
-        executeTargetDeploy(TcpAdbTransport(ip, port), isGoatsDrive, disableZlink)
+        executeTargetDeploy(TcpAdbTransport(ip, port), targetMode, disableZlink)
     }
 
-    private fun executeTargetDeploy(transport: AdbTransport, isGoatsDrive: Boolean, disableZlink: Boolean) {
+    private fun executeTargetDeploy(transport: AdbTransport, targetMode: Int, disableZlink: Boolean) {
         setBusyState(true)
 
-        if (isGoatsDrive) {
-            val release = latestReleaseInfo
-            if (release != null && !ApkUpdateManager.isCachedUpToDate(this, release)) {
-                appendLog("⬇️ Downloading latest GoatsDrive build [${release.tagName}] from GitHub...")
-                updateProgress(0, "Downloading latest APK...")
+        when (targetMode) {
+            MODE_GOATSDRIVE -> {
+                val release = latestReleaseInfo
+                if (release != null && !ApkUpdateManager.isCachedUpToDate(this, release, ApkUpdateManager.TargetAsset.GOATSDRIVE)) {
+                    appendLog("⬇️ Downloading latest GoatsDrive build [${release.tagName}] from GitHub...")
+                    updateProgress(0, "Downloading GoatsDrive APK...")
 
-                ApkUpdateManager.downloadLatestApk(
-                    context = this,
-                    release = release,
-                    onProgress = { pct, downloaded, total ->
-                        mainHandler.post {
-                            updateProgress(pct, "Downloading: $pct% (${downloaded / 1024} KB / ${total / 1024} KB)")
-                        }
-                    },
-                    onComplete = { file, error ->
-                        mainHandler.post {
-                            if (file != null && file.exists()) {
-                                appendLog("✅ Download verified (${file.length() / 1024} KB).")
-                                updateBuildStatusLabel()
-                                dispatchInstall(transport, isGoatsDrive = true, disableZlink = disableZlink)
-                            } else {
-                                appendLog("⚠️ Download failed ($error). Using cached/embedded APK.")
-                                dispatchInstall(transport, isGoatsDrive = true, disableZlink = disableZlink)
+                    ApkUpdateManager.downloadLatestApk(
+                        context = this,
+                        release = release,
+                        target = ApkUpdateManager.TargetAsset.GOATSDRIVE,
+                        onProgress = { pct, downloaded, total ->
+                            mainHandler.post {
+                                updateProgress(pct, "Downloading: $pct% (${downloaded / 1024} KB / ${total / 1024} KB)")
+                            }
+                        },
+                        onComplete = { file, error ->
+                            mainHandler.post {
+                                if (file != null && file.exists()) {
+                                    appendLog("✅ Download verified (${file.length() / 1024} KB).")
+                                    updateBuildStatusLabel()
+                                } else {
+                                    appendLog("⚠️ Download failed ($error). Using cached/embedded APK.")
+                                }
+                                dispatchInstall(transport, targetMode, disableZlink)
                             }
                         }
-                    }
-                )
-            } else {
-                dispatchInstall(transport, isGoatsDrive = true, disableZlink = disableZlink)
+                    )
+                } else {
+                    dispatchInstall(transport, targetMode, disableZlink)
+                }
             }
-        } else {
-            dispatchInstall(transport, isGoatsDrive = false, disableZlink = false)
+
+            MODE_CRUZEOS -> {
+                val release = cruzeOsReleaseInfo
+                if (release != null && !ApkUpdateManager.isCachedUpToDate(this, release, ApkUpdateManager.TargetAsset.CRUZEOS)) {
+                    appendLog("⬇️ Downloading latest CruzeOS 3D build [${release.tagName}] from GitHub...")
+                    updateProgress(0, "Downloading CruzeOS 3D APK...")
+
+                    ApkUpdateManager.downloadLatestApk(
+                        context = this,
+                        release = release,
+                        target = ApkUpdateManager.TargetAsset.CRUZEOS,
+                        onProgress = { pct, downloaded, total ->
+                            mainHandler.post {
+                                updateProgress(pct, "Downloading CruzeOS: $pct% (${downloaded / 1024} KB / ${total / 1024} KB)")
+                            }
+                        },
+                        onComplete = { file, error ->
+                            mainHandler.post {
+                                if (file != null && file.exists()) {
+                                    appendLog("✅ CruzeOS 3D download verified (${file.length() / 1024} KB).")
+                                } else {
+                                    appendLog("⚠️ Download failed ($error). Using cached/embedded APK.")
+                                }
+                                dispatchInstall(transport, targetMode, disableZlink)
+                            }
+                        }
+                    )
+                } else {
+                    dispatchInstall(transport, targetMode, disableZlink)
+                }
+            }
+
+            MODE_CUSTOM_APK -> {
+                dispatchInstall(transport, targetMode, disableZlink = false)
+            }
         }
     }
 
-    private fun dispatchInstall(transport: AdbTransport, isGoatsDrive: Boolean, disableZlink: Boolean) {
+    private fun dispatchInstall(transport: AdbTransport, targetMode: Int, disableZlink: Boolean) {
         val task: HeadUnitProvisioner.InstallTask
 
-        if (isGoatsDrive) {
-            val apkBytes = ApkUpdateManager.getBestApkBytes(this) { log -> appendLog(log) }
-            if (apkBytes.isEmpty()) {
-                appendLog("❌ No GoatsDrive APK binary available.")
-                setBusyState(false)
-                return
+        when (targetMode) {
+            MODE_GOATSDRIVE -> {
+                val apkBytes = ApkUpdateManager.getBestApkBytes(this, ApkUpdateManager.TargetAsset.GOATSDRIVE) { log -> appendLog(log) }
+                if (apkBytes.isEmpty()) {
+                    appendLog("❌ No GoatsDrive APK binary available.")
+                    setBusyState(false)
+                    return
+                }
+                task = HeadUnitProvisioner.InstallTask(
+                    transport = transport,
+                    apkBytes = apkBytes,
+                    totalSizeBytes = apkBytes.size.toLong(),
+                    appTitle = "GoatsDrive",
+                    packageName = HeadUnitProvisioner.GOATSDRIVE_PACKAGE,
+                    isGoatsDrive = true,
+                    isCruzeOs = false,
+                    disableZlink = disableZlink,
+                    launchAfterInstall = true
+                )
             }
-            task = HeadUnitProvisioner.InstallTask(
-                transport = transport,
-                apkBytes = apkBytes,
-                totalSizeBytes = apkBytes.size.toLong(),
-                appTitle = "GoatsDrive",
-                packageName = HeadUnitProvisioner.GOATSDRIVE_PACKAGE,
-                isGoatsDrive = true,
-                disableZlink = disableZlink,
-                launchAfterInstall = true
-            )
-        } else {
-            val uri = customApkUri
-            if (uri == null) {
-                appendLog("❌ No custom APK selected.")
-                setBusyState(false)
-                return
+
+            MODE_CRUZEOS -> {
+                val apkBytes = ApkUpdateManager.getBestApkBytes(this, ApkUpdateManager.TargetAsset.CRUZEOS) { log -> appendLog(log) }
+                if (apkBytes.isEmpty()) {
+                    appendLog("❌ No CruzeOS-Launcher.apk binary available.")
+                    setBusyState(false)
+                    return
+                }
+                task = HeadUnitProvisioner.InstallTask(
+                    transport = transport,
+                    apkBytes = apkBytes,
+                    totalSizeBytes = apkBytes.size.toLong(),
+                    appTitle = "CruzeOS 3D Launcher",
+                    packageName = HeadUnitProvisioner.CRUZEOS_PACKAGE,
+                    isGoatsDrive = false,
+                    isCruzeOs = true,
+                    disableZlink = false,
+                    launchAfterInstall = true
+                )
             }
-            task = HeadUnitProvisioner.InstallTask(
-                transport = transport,
-                apkStreamProvider = { contentResolver.openInputStream(uri) },
-                totalSizeBytes = customApkSize,
-                appTitle = customApkTitle.ifEmpty { "Custom App" },
-                packageName = customApkPackage.ifEmpty { "custom.package" },
-                isGoatsDrive = false,
-                disableZlink = false,
-                launchAfterInstall = customLaunchCheckBox.isChecked
-            )
+
+            MODE_CUSTOM_APK -> {
+                val uri = customApkUri
+                if (uri == null) {
+                    appendLog("❌ No custom APK selected.")
+                    setBusyState(false)
+                    return
+                }
+                task = HeadUnitProvisioner.InstallTask(
+                    transport = transport,
+                    apkStreamProvider = { contentResolver.openInputStream(uri) },
+                    totalSizeBytes = customApkSize,
+                    appTitle = customApkTitle.ifEmpty { "Custom App" },
+                    packageName = customApkPackage.ifEmpty { "custom.package" },
+                    isGoatsDrive = false,
+                    isCruzeOs = false,
+                    disableZlink = false,
+                    launchAfterInstall = customLaunchCheckBox.isChecked
+                )
+            }
+
+            else -> return
         }
 
         provisioner.executeInstall(task, object : HeadUnitProvisioner.Listener {
@@ -965,7 +1118,7 @@ class MainActivity : Activity() {
                 isCheckingUpdate = false
                 if (info != null) {
                     latestReleaseInfo = info
-                    val isCached = ApkUpdateManager.isCachedUpToDate(this, info)
+                    val isCached = ApkUpdateManager.isCachedUpToDate(this, info, ApkUpdateManager.TargetAsset.GOATSDRIVE)
                     val sizeKb = info.sizeBytes / 1024
                     if (isCached) {
                         updateStatusText.text = "Latest: ${info.tagName} (Up to date - ${sizeKb} KB)"
@@ -977,8 +1130,35 @@ class MainActivity : Activity() {
                         appendLog("🔔 Newer build found on GitHub: ${info.tagName} (${sizeKb} KB). Will download during flash.")
                     }
                 } else {
-                    val desc = ApkUpdateManager.getStatusDescription(this)
+                    val desc = ApkUpdateManager.getStatusDescription(this, ApkUpdateManager.TargetAsset.GOATSDRIVE)
                     updateStatusText.text = "Using local build: $desc"
+                    if (manual) {
+                        appendLog("ℹ️ Could not check GitHub (${error ?: "offline"}). Using local build: $desc")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun checkForCruzeUpdates(manual: Boolean) {
+        ApkUpdateManager.checkLatestRelease(ApkUpdateManager.TargetAsset.CRUZEOS) { info, error ->
+            mainHandler.post {
+                cruzeOsReleaseInfo = info
+                if (info != null) {
+                    val sizeKb = (info.sizeBytes / 1024).toInt()
+                    val isCached = ApkUpdateManager.isCachedUpToDate(this, info, ApkUpdateManager.TargetAsset.CRUZEOS)
+                    if (isCached) {
+                        cruzeOsUpdateStatusText.text = "Latest: ${info.tagName} (Up to date - ${sizeKb} KB)"
+                        cruzeOsUpdateStatusText.setTextColor(Color.parseColor("#81C784"))
+                        if (manual) appendLog("✅ You have the latest CruzeOS 3D build [${info.tagName}] cached.")
+                    } else {
+                        cruzeOsUpdateStatusText.text = "Newer Build Available: ${info.tagName} (${sizeKb} KB)"
+                        cruzeOsUpdateStatusText.setTextColor(Color.parseColor("#FFD54F"))
+                        appendLog("🔔 Newer CruzeOS 3D build found on GitHub: ${info.tagName} (${sizeKb} KB).")
+                    }
+                } else {
+                    val desc = ApkUpdateManager.getStatusDescription(this, ApkUpdateManager.TargetAsset.CRUZEOS)
+                    cruzeOsUpdateStatusText.text = "Using local build: $desc"
                     if (manual) {
                         appendLog("ℹ️ Could not check GitHub (${error ?: "offline"}). Using local build: $desc")
                     }

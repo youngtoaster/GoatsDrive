@@ -44,13 +44,18 @@ jobs:
             cp app/build/outputs/apk/release/app-release.apk installer-app/src/main/assets/GoatsDrive.apk
           fi
 
-      - name: Build GoatsInstaller Companion APK
-        run: |
-          ./gradlew :installer-app:assembleRelease --stacktrace
-
       - name: Build CruzeOS Launcher APK
         run: |
           ./gradlew :launcher:assembleRelease --stacktrace
+          if [ -f launcher/build/outputs/apk/release/launcher-release-unsigned.apk ]; then
+            cp launcher/build/outputs/apk/release/launcher-release-unsigned.apk installer-app/src/main/assets/CruzeOS-Launcher.apk
+          elif [ -f launcher/build/outputs/apk/release/launcher-release.apk ]; then
+            cp launcher/build/outputs/apk/release/launcher-release.apk installer-app/src/main/assets/CruzeOS-Launcher.apk
+          fi
+
+      - name: Build GoatsInstaller Companion APK
+        run: |
+          ./gradlew :installer-app:assembleRelease --stacktrace
 
       - name: Prepare Release Artifacts
         run: |
@@ -96,7 +101,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name == 'main' && 'v1.0.0' || github.ref_name }}
-          name: "GoatsDrive v1.0.0 — Zero-Copy Receiver, CruzeOS 3D Launcher & USB Sideload Deployer"
+          name: "GoatsDrive & CruzeOS ${{ github.ref_name == 'main' && 'v1.0.0' || github.ref_name }} — Zero-Copy Receiver, 3D Launcher & USB Sideload Deployer"
+          make_latest: true
           body: |
             ## ⚡ GoatsDrive & CruzeOS v1.0.0 Release
 
