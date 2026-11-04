@@ -20,6 +20,30 @@ Unlike stock Chinese head unit apps that consume 350MB+ RAM and stutter under lo
 
 ---
 
+## 🚗 CruzeOS: Next-Gen 3D Automotive Home Launcher (2012 Chevy Cruze LTZ)
+
+Built directly alongside GoatsDrive, **CruzeOS** (`com.apexlink.cruzeos`) transforms your aftermarket Android head unit into an ultra-premium, Tesla/Rivian-inspired digital cockpit tailored specifically for the **2012 Chevrolet Cruze LTZ**:
+
+* **Real-Time Interactive 3D Vehicle Stage:**
+  - Embedded Three.js WebGL PBR engine rendering the actual 2012 Chevy Cruze LTZ 3D model with realistic metallic clearcoat paint and ice-blue rim lighting.
+  - Interactive articulated doors (Driver, Passenger, Rear Left, Rear Right) and trunk that open/close in real-time when tapped or when CAN-bus signals arrive.
+  - Dynamic wheel rotation synced to vehicle speed, front wheel steering angle response, and multi-angle camera presets (3/4 Isometric, Top/Doors, Driver POV, Rear/Trunk).
+  - Quick-palette car paint customizer (Silver Ice Metallic, Crystal Red, Black Granite, Summit White, Cyber Gray, Blue Topaz).
+* **Dual-Zone HVAC Climate Control & Persistent Floating HUD:**
+  - Comprehensive automotive climate panel: dual-zone temperature steppers (Lo/Hi, 0.5° increments), 8 blower speeds, air distribution modes (Face, Feet, Defrost), Max AC, Air Recirculation, and 3-stage driver/passenger heated seats.
+  - **Floating Climate HUD Overlay (`FloatingClimateOverlayService`):** Crucial for driving—spins up a non-intrusive floating climate bar (`TYPE_APPLICATION_OVERLAY`) that stays accessible on top of full-screen Apple CarPlay or Android Auto navigation sessions, so you can adjust temperature, fans, and heated seats without exiting CarPlay!
+* **GM Delta II / GMLAN CAN-Bus Engine:**
+  - Low-overhead background daemon listening directly to MCU hardware UART ports (`/dev/ttyMT0`, `/dev/ttyS0-S2`) and head unit system CAN broadcasts (`com.fyt.system.canbus`, `com.ts.canbus`).
+  - Decodes real-time vehicle telemetry: door open/closed states, speedometer (mph), tachometer (RPM), fuel level percentage, 12V battery voltage, exterior ambient temperature, steering wheel angle, and TPMS tire pressure monitoring.
+* **Universal Media Player & Steering Wheel Controls:**
+  - Integrated music dashboard card with play/pause, track skip/previous, scrub bar, and album artwork display.
+  - Full hardware steering wheel control (SWC) keycode interception (`KEYCODE_MEDIA_NEXT`, `KEYCODE_MEDIA_PREVIOUS`, `KEYCODE_MEDIA_PLAY_PAUSE`, `KEYCODE_VOLUME_UP`, `KEYCODE_VOLUME_DOWN`).
+* **Fluid App Drawer & Quick Dock:**
+  - Bottom launcher dock with one-tap access to CarPlay/Android Auto (`GoatsDrive`), Climate Control, Media, 3D Vehicle Controls, Navigation, and All Apps.
+  - Fullscreen app drawer with instant fuzzy search, listing all apps installed on the head unit and allowing users to pin favorite apps to the persistent bottom dock.
+
+---
+
 ## 📱 Quick & Easy Installation from an Android Phone
 
 You can deploy GoatsDrive to your car's head unit directly from your phone in under 30 seconds—**no computer required**.
@@ -97,6 +121,16 @@ GoatsDrive/
 │       ├── AdbClient.kt         # Pure Kotlin ADB TCP client
 │       ├── HeadUnitProvisioner.kt
 │       └── MainActivity.kt      # Phone UI with live deployment console
+├── launcher/                    # CruzeOS 3D Next-Gen Home Launcher (Chevy Cruze LTZ)
+│   ├── src/main/assets/cruze3d/ # 2012 Chevy Cruze LTZ 3D model & Three.js PBR stage
+│   └── src/main/java/com/apexlink/cruze/
+│       ├── CruzeLauncherActivity.kt          # Fullscreen dashboard & view switcher
+│       ├── can/CanBusService.kt              # GM Delta II CAN-bus hardware listener
+│       ├── climate/ClimateController.kt      # Dual-zone HVAC logic
+│       ├── climate/FloatingClimateOverlayService.kt # CarPlay/Android Auto HUD overlay
+│       ├── media/MediaManager.kt             # Universal automotive music controller
+│       ├── apps/AppDrawerManager.kt          # App list, search & dock pinning
+│       └── view/Cruze3dViewportView.kt       # Three.js hardware-accelerated WebView
 └── scripts/
     ├── install-headunit.sh      # One-click installer for Termux / Mac / Linux
     └── install-headunit.bat     # One-click installer for Windows
@@ -112,12 +146,13 @@ Ensure you have Android SDK 34 and NDK 26+ installed:
 git clone https://github.com/youngtoaster/GoatsDrive.git
 cd GoatsDrive
 
-# Build Head Unit Receiver APK & Phone Companion Installer APK
+# Build Head Unit Receiver, Phone Installer, and CruzeOS 3D Launcher APKs
 ./gradlew assembleRelease
 ```
 The resulting binaries will be placed in:
-* `app/build/outputs/apk/release/`
-* `installer-app/build/outputs/apk/release/`
+* `app/build/outputs/apk/release/GoatsDrive.apk`
+* `installer-app/build/outputs/apk/release/GoatsInstaller.apk`
+* `launcher/build/outputs/apk/release/CruzeOS-Launcher.apk`
 
 ---
 

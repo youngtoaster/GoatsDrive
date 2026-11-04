@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "GoatsDrive"
 include(":app")
 include(":installer-app")
+include(":launcher")

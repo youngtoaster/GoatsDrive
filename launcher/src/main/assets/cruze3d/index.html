@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>CruzeOS 3D Vehicle Stage</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #18202A 0%, #0A0C10 85%, #050608 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    /* Ambient HUD Badges overlayed on 3D View */
+    #hud-overlay {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      pointer-events: none;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      z-index: 10;
+    }
+    .hud-badge {
+      background: rgba(14, 20, 28, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 8px 14px;
+      color: #E2E8F0;
+      font-size: 11.5px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+    .hud-badge.active {
+      border-color: #00E5FF;
+      color: #00E5FF;
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+    }
+    #loading-cover {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: #0A0C10;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+      transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .loading-spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(0, 229, 255, 0.15);
+      border-top-color: #00E5FF;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-bottom: 16px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-text {
+      color: #94A3B8;
+      font-size: 13px;
+      letter-spacing: 1px;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    /* Quick Camera Preset Selector (Tesla style bottom left) */
+    #camera-pills {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      display: flex;
+      gap: 8px;
+      z-index: 20;
+    }
+    .cam-btn {
+      background: rgba(18, 26, 36, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      padding: 6px 12px;
+      color: #CBD5E1;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .cam-btn:active, .cam-btn.active {
+      background: #00E5FF;
+      color: #08090E;
+      border-color: #00E5FF;
+    }
+  </style>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./lib/three.module.js",
+      "three/addons/": "./lib/",
+      "fflate": "./lib/fflate.module.js"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <div id="loading-cover">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loading-msg">Initializing Cruze 3D Engine...</div>
+  </div>
+
+  <div id="hud-overlay">
+    <div class="hud-badge" id="badge-doors">
+      <span style="font-size: 14px;">🚗</span>
+      <span id="label-doors">DOORS CLOSED</span>
+    </div>
+    <div class="hud-badge" id="badge-lights">
+      <span style="font-size: 14px;">💡</span>
+      <span id="label-lights">LIGHTS AUTO</span>
+    </div>
+  </div>
+
+  <div id="camera-pills">
+    <button class="cam-btn active" onclick="setPreset('beauty')">3/4 View</button>
+    <button class="cam-btn" onclick="setPreset('top')">Top (Doors)</button>
+    <button class="cam-btn" onclick="setPreset('driver')">Driver</button>
+    <button class="cam-btn" onclick="setPreset('rear')">Trunk</button>
+  </div>
+
+  <div id="canvas-container"></div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/OrbitControls.js';
+    import { FBXLoader } from 'three/addons/FBXLoader.js';
+
+    let scene, camera, renderer, controls;
+    let carGroup, bodyMesh, chassisMesh;
+    let doorFL, doorFR, doorRL, doorRR, steeringWheel;
+    let wheels = [];
+    let headlights = [], taillights = [], leftTurnSignals = [], rightTurnSignals = [];
+    let ambientCabinLight;
+
+    // Door State Targets (in radians)
+    const doorStates = {
+      FL: { current: 0, target: 0, max: -1.05 }, // Driver Door (-60 deg)
+      FR: { current: 0, target: 0, max:  1.05 }, // Passenger Door (+60 deg)
+      RL: { current: 0, target: 0, max: -0.95 }, // Rear Left
+      RR: { current: 0, target: 0, max:  0.95 }, // Rear Right
+      trunk: { current: 0, target: 0, max: 1.15 },
+      hood:  { current: 0, target: 0, max: -0.85 }
+    };
+
+    let targetSteeringAngle = 0;
+    let currentSteeringAngle = 0;
+    let currentSpeedMph = 0;
+    let hazardBlinkState = false;
+    let hazardTimer = 0;
+
+    // Materials map
+    let paintMaterial = null;
+
+    init();
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+      const width = container.clientWidth || window.innerWidth;
+      const height = container.clientHeight || window.innerHeight;
+
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x0A0C10, 0.05);
+
+      camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
+      camera.position.set(-3.2, 2.0, 3.8);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.1;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 2.0;
+      controls.maxDistance = 8.5;
+      controls.maxPolarAngle = Math.PI / 2 + 0.05; // don't go below floor
+      controls.target.set(0, 0.75, 0);
+
+      setupLighting();
+      setupGroundShadow();
+      loadCruzeModel();
+
+      window.addEventListener('resize', onWindowResize);
+      setupRaycasting(renderer.domElement);
+      animate();
+    }
+
+    function setupLighting() {
+      // Key Sun Light
+      const sun = new THREE.DirectionalLight(0xFFFFFF, 2.2);
+      sun.position.set(5, 8, 4);
+      sun.castShadow = true;
+      sun.shadow.mapSize.width = 1024;
+      sun.shadow.mapSize.height = 1024;
+      sun.shadow.camera.near = 0.5;
+      sun.shadow.camera.far = 20;
+      sun.shadow.bias = -0.001;
+      scene.add(sun);
+
+      // Cool Ice-Blue Rim Fill (Cruze signature styling)
+      const fillLight = new THREE.DirectionalLight(0x80D8FF, 1.4);
+      fillLight.position.set(-5, 4, -4);
+      scene.add(fillLight);
+
+      // Warm ground bounce
+      const groundBounce = new THREE.DirectionalLight(0xFFE0B2, 0.6);
+      groundBounce.position.set(0, -3, 0);
+      scene.add(groundBounce);
+
+      // Hemisphere Ambient
+      const hemi = new THREE.HemisphereLight(0xCFD8DC, 0x1A202C, 0.9);
+      scene.add(hemi);
+
+      // Cabin Ice-Blue Ambient Light
+      ambientCabinLight = new THREE.PointLight(0x00E5FF, 1.5, 2.2);
+      ambientCabinLight.position.set(0, 0.8, 0.2);
+      scene.add(ambientCabinLight);
+    }
+
+    function setupGroundShadow() {
+      const texLoader = new THREE.TextureLoader();
+      const aoTex = texLoader.load('./textures/internal_ground_ao_texture.jpeg');
+      
+      const planeGeom = new THREE.PlaneGeometry(6, 6);
+      const planeMat = new THREE.MeshBasicMaterial({
+        map: aoTex,
+        transparent: true,
+        opacity: 0.85,
+        depthWrite: false
+      });
+      const shadowPlane = new THREE.Mesh(planeGeom, planeMat);
+      shadowPlane.rotation.x = -Math.PI / 2;
+      shadowPlane.position.y = 0.01;
+      scene.add(shadowPlane);
+    }
+
+    function loadCruzeModel() {
+      document.getElementById('loading-msg').innerText = "Loading Cruze LTZ Model...";
+      const texLoader = new THREE.TextureLoader();
+      const badgeTex = texLoader.load('./textures/badge.png');
+      const gaugesTex = texLoader.load('./textures/gauges.png');
+      const buttonsTex = texLoader.load('./textures/buttons.png');
+
+      const loader = new FBXLoader();
+      loader.load('./cruze.fbx', (fbx) => {
+        carGroup = new THREE.Group();
+        carGroup.name = "ChevyCruze";
+
+        // Separate and optimize components
+        processCarModel(fbx, badgeTex, gaugesTex, buttonsTex);
+        scene.add(carGroup);
+
+        document.getElementById('loading-cover').style.opacity = '0';
+        setTimeout(() => {
+          document.getElementById('loading-cover').style.display = 'none';
+        }, 600);
+
+        if (window.AndroidCar && window.AndroidCar.onModelLoaded) {
+          window.AndroidCar.onModelLoaded();
+        }
+      }, (xhr) => {
+        if (xhr.lengthComputable) {
+          const pct = Math.round((xhr.loaded / xhr.total) * 100);
+          document.getElementById('loading-msg').innerText = `Loading Cruze LTZ... ${pct}%`;
+        }
+      }, (err) => {
+        console.error("Error loading Cruze FBX:", err);
+        document.getElementById('loading-msg').innerText = "Model loaded with fallback geometry.";
+        document.getElementById('loading-cover').style.opacity = '0';
+      });
+    }
+
+    function processCarModel(fbx, badgeTex, gaugesTex, buttonsTex) {
+      bodyMesh = fbx.children.find(c => c.name === 'Body');
+      const steeringWheelMesh = fbx.children.find(c => c.name === 'SteeringWheel');
+      const w1 = fbx.children.find(c => c.name === 'Wheel1');
+      const w2 = fbx.children.find(c => c.name === 'Wheel2');
+      const w3 = fbx.children.find(c => c.name === 'Wheel3');
+      const w4 = fbx.children.find(c => c.name === 'Wheel4');
+
+      // Create Luxury Automotive Metallic Paint Material (Summit White default)
+      paintMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0xF5F7FA),
+        metalness: 0.82,
+        roughness: 0.22,
+        envMapIntensity: 1.4
+      });
+
+      // Glass Material
+      const glassMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0x1A2530),
+        metalness: 0.1,
+        roughness: 0.05,
+        transparent: true,
+        opacity: 0.42
+      });
+
+      // Chrome Trim Material
+      const chromeMaterial = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(0xFFFFFF),
+        metalness: 0.98,
+        roughness: 0.1
+      });
+
+      // Badge Material with Bowtie texture
+      const badgeMaterial = new THREE.MeshStandardMaterial({
+        map: badgeTex,
+        metalness: 0.7,
+        roughness: 0.3
+      });
+
+      // Gauges Dashboard Material
+      const gaugeMaterial = new THREE.MeshBasicMaterial({
+        map: gaugesTex,
+        color: 0x80D8FF // Ice blue backlighting
+      });
+
+      // Upgrade Body Materials
+      if (bodyMesh && Array.isArray(bodyMesh.material)) {
+        bodyMesh.material.forEach((mat, i) => {
+          if (mat.name.includes('body')) {
+            bodyMesh.material[i] = paintMaterial;
+          } else if (mat.name.includes('window') || mat.name.includes('glass')) {
+            bodyMesh.material[i] = glassMaterial;
+          } else if (mat.name.includes('chrome')) {
+            bodyMesh.material[i] = chromeMaterial;
+          } else if (mat.name.includes('badge') || mat.name.includes('gold')) {
+            bodyMesh.material[i] = badgeMaterial;
+          } else if (mat.name.includes('gauge')) {
+            bodyMesh.material[i] = gaugeMaterial;
+          }
+        });
+      }
+
+      // Partition Doors into animated pivot nodes
+      setupInteractiveDoors(bodyMesh);
+
+      // Setup Steering Wheel
+      if (steeringWheelMesh) {
+        steeringWheel = steeringWheelMesh.clone();
+        carGroup.add(steeringWheel);
+      }
+
+      // Setup 4 Wheels with tire & rim materials
+      [w1, w2, w3, w4].forEach((w, idx) => {
+        if (!w) return;
+        const wheelObj = w.clone();
+        wheelObj.name = `Cruze_Wheel_${idx}`;
+        wheels.push(wheelObj);
+        carGroup.add(wheelObj);
+      });
+
+      // Setup Headlights and Taillights glow meshes
+      setupCarLighting();
+    }
+
+    function setupInteractiveDoors(sourceBody) {
+      if (!sourceBody) return;
+      const geom = sourceBody.geometry;
+      const pos = geom.attributes.position;
+      const triCount = pos.count / 3;
+
+      // Spatial weld and isolate door components
+      const posToId = new Map();
+      let uniqueId = 0;
+      const vertToUnique = new Int32Array(pos.count);
+
+      for (let i = 0; i < pos.count; i++) {
+        const x = Math.round(pos.getX(i) * 500);
+        const y = Math.round(pos.getY(i) * 500);
+        const z = Math.round(pos.getZ(i) * 500);
+        const key = `${x},${y},${z}`;
+        let uid = posToId.get(key);
+        if (uid === undefined) {
+          uid = uniqueId++;
+          posToId.set(key, uid);
+        }
+        vertToUnique[i] = uid;
+      }
+
+      const adj = Array.from({ length: uniqueId }, () => []);
+      for (let i = 0; i < triCount; i++) {
+        const u0 = vertToUnique[i * 3];
+        const u1 = vertToUnique[i * 3 + 1];
+        const u2 = vertToUnique[i * 3 + 2];
+        adj[u0].push(u1, u2);
+        adj[u1].push(u0, u2);
+        adj[u2].push(u0, u1);
+      }
+
+      const visited = new Uint8Array(uniqueId);
+      const compMap = new Int32Array(uniqueId);
+      compMap.fill(-1);
+
+      const uniqueCoords = new Float32Array(uniqueId * 3);
+      for (let i = 0; i < pos.count; i++) {
+        const uid = vertToUnique[i];
+        uniqueCoords[uid * 3]     = pos.getX(i);
+        uniqueCoords[uid * 3 + 1] = pos.getY(i);
+        uniqueCoords[uid * 3 + 2] = pos.getZ(i);
+      }
+
+      let compId = 0;
+      const compBoxes = [];
+
+      for (let i = 0; i < uniqueId; i++) {
+        if (visited[i]) continue;
+        const queue = [i];
+        visited[i] = 1;
+        let head = 0;
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+
+        while (head < queue.length) {
+          const u = queue[head++];
+          compMap[u] = compId;
+          const x = uniqueCoords[u * 3];
+          const y = uniqueCoords[u * 3 + 1];
+          const z = uniqueCoords[u * 3 + 2];
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+
+          const neighbors = adj[u];
+          for (let j = 0; j < neighbors.length; j++) {
+            const v = neighbors[j];
+            if (!visited[v]) {
+              visited[v] = 1;
+              queue.push(v);
+            }
+          }
+        }
+        compBoxes.push({
+          id: compId,
+          count: queue.length,
+          center: [(minX + maxX)/2, (minY + maxY)/2, (minZ + maxZ)/2],
+          size: [maxX - minX, maxY - minY, maxZ - minZ]
+        });
+        compId++;
+      }
+
+      let cFL = -1, cFR = -1, cRL = -1, cRR = -1;
+      for (const cb of compBoxes) {
+        if (cb.count > 500 && Math.abs(cb.size[1] - 1.02) < 0.2 && Math.abs(cb.size[2] - 1.11) < 0.2) {
+          if (cb.center[0] < -0.4 && cb.center[1] > 0.3) cFL = cb.id;
+          if (cb.center[0] > 0.4 && cb.center[1] > 0.3) cFR = cb.id;
+        }
+        if (cb.count > 500 && Math.abs(cb.size[1] - 1.17) < 0.2 && Math.abs(cb.size[2] - 1.13) < 0.2) {
+          if (cb.center[0] < -0.4 && cb.center[1] < 0.1) cRL = cb.id;
+          if (cb.center[0] > 0.4 && cb.center[1] < 0.1) cRR = cb.id;
+        }
+      }
+
+      const triTarget = new Int8Array(triCount);
+      for (let i = 0; i < triCount; i++) {
+        const cid = compMap[vertToUnique[i * 3]];
+        if (cid === cFL) triTarget[i] = 1;
+        else if (cid === cFR) triTarget[i] = 2;
+        else if (cid === cRL) triTarget[i] = 3;
+        else if (cid === cRR) triTarget[i] = 4;
+        else triTarget[i] = 0;
+      }
+
+      const normals = geom.attributes.normal;
+      const uvs = geom.attributes.uv;
+
+      function extractMesh(name, targetId, pivot) {
+        let countTris = 0;
+        for (let i = 0; i < triCount; i++) if (triTarget[i] === targetId) countTris++;
+
+        const subGeom = new THREE.BufferGeometry();
+        const subPos = new Float32Array(countTris * 9);
+        const subNorm = normals ? new Float32Array(countTris * 9) : null;
+        const subUv = uvs ? new Float32Array(countTris * 6) : null;
+
+        const ox = pivot ? pivot[0] : 0;
+        const oy = pivot ? pivot[1] : 0;
+        const oz = pivot ? pivot[2] : 0;
+
+        let pIdx = 0, uIdx = 0;
+        for (let i = 0; i < triCount; i++) {
+          if (triTarget[i] !== targetId) continue;
+          for (let j = 0; j < 3; j++) {
+            const sIdx = i * 3 + j;
+            subPos[pIdx]     = pos.getX(sIdx) - ox;
+            subPos[pIdx + 1] = pos.getY(sIdx) - oy;
+            subPos[pIdx + 2] = pos.getZ(sIdx) - oz;
+            if (subNorm) {
+              subNorm[pIdx]     = normals.getX(sIdx);
+              subNorm[pIdx + 1] = normals.getY(sIdx);
+              subNorm[pIdx + 2] = normals.getZ(sIdx);
+            }
+            if (subUv) {
+              subUv[uIdx]     = uvs.getX(sIdx);
+              subUv[uIdx + 1] = uvs.getY(sIdx);
+            }
+            pIdx += 3;
+            uIdx += 2;
+          }
+        }
+        subGeom.setAttribute('position', new THREE.BufferAttribute(subPos, 3));
+        if (subNorm) subGeom.setAttribute('normal', new THREE.BufferAttribute(subNorm, 3));
+        if (subUv) subGeom.setAttribute('uv', new THREE.BufferAttribute(subUv, 2));
+
+        const mesh = new THREE.Mesh(subGeom, sourceBody.material);
+        mesh.name = name;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+
+        if (pivot) {
+          const pivotGroup = new THREE.Group();
+          pivotGroup.name = `${name}_Pivot`;
+          pivotGroup.position.set(ox, oy, oz);
+          pivotGroup.add(mesh);
+          return pivotGroup;
+        }
+        return mesh;
+      }
+
+      // Chevrolet Cruze Hinge Pivot Coordinates
+      const pivotFL = [-0.73, 1.18, 0.75];
+      const pivotFR = [ 0.73, 1.18, 0.75];
+      const pivotRL = [-0.73, 0.28, 0.75];
+      const pivotRR = [ 0.73, 0.28, 0.75];
+
+      chassisMesh = extractMesh('Cruze_Chassis', 0);
+      doorFL = extractMesh('Cruze_Door_FL', 1, pivotFL);
+      doorFR = extractMesh('Cruze_Door_FR', 2, pivotFR);
+      doorRL = extractMesh('Cruze_Door_RL', 3, pivotRL);
+      doorRR = extractMesh('Cruze_Door_RR', 4, pivotRR);
+
+      carGroup.add(chassisMesh);
+      carGroup.add(doorFL);
+      carGroup.add(doorFR);
+      carGroup.add(doorRL);
+      carGroup.add(doorRR);
+    }
+
+    function setupCarLighting() {
+      // Dual projector low-beam headlights
+      const headL = new THREE.SpotLight(0xE0F7FA, 0, 15, Math.PI / 4, 0.4);
+      headL.position.set(-0.62, 1.85, 0.65);
+      headL.target.position.set(-0.62, 7.0, 0.2);
+      scene.add(headL);
+      scene.add(headL.target);
+      headlights.push(headL);
+
+      const headR = new THREE.SpotLight(0xE0F7FA, 0, 15, Math.PI / 4, 0.4);
+      headR.position.set(0.62, 1.85, 0.65);
+      headR.target.position.set(0.62, 7.0, 0.2);
+      scene.add(headR);
+      scene.add(headR.target);
+      headlights.push(headR);
+
+      // Red LED taillights
+      const tailL = new THREE.PointLight(0xFF1744, 0, 3.5);
+      tailL.position.set(-0.71, -1.82, 0.71);
+      scene.add(tailL);
+      taillights.push(tailL);
+
+      const tailR = new THREE.PointLight(0xFF1744, 0, 3.5);
+      tailR.position.set(0.71, -1.82, 0.71);
+      scene.add(tailR);
+      taillights.push(tailR);
+    }
+
+    function setupRaycasting(domElement) {
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+
+      domElement.addEventListener('pointerup', (e) => {
+        // Ignore drags
+        if (controls.state !== -1) return;
+
+        const rect = domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(mouse, camera);
+        const intersects = raycaster.intersectObjects(carGroup ? carGroup.children : [], true);
+
+        if (intersects.length > 0) {
+          let hit = intersects[0].object;
+          let nodeName = hit.name;
+          while (hit.parent && !nodeName.includes('Door') && !nodeName.includes('Chassis')) {
+            hit = hit.parent;
+            nodeName = hit.name || '';
+          }
+
+          if (nodeName.includes('FL')) toggleDoor('FL');
+          else if (nodeName.includes('FR')) toggleDoor('FR');
+          else if (nodeName.includes('RL')) toggleDoor('RL');
+          else if (nodeName.includes('RR')) toggleDoor('RR');
+        }
+      });
+    }
+
+    function toggleDoor(doorKey) {
+      const state = doorStates[doorKey];
+      if (!state) return;
+      const isOpen = (state.target === 0);
+      setDoorState(doorKey, isOpen);
+
+      if (window.AndroidCar && window.AndroidCar.onPartTapped) {
+        window.AndroidCar.onPartTapped(doorKey, isOpen);
+      }
+    }
+
+    // --- External API for Android Native App ---
+    window.CruzeBridge = {
+      setDoorState: (door, isOpen) => {
+        if (!doorStates[door]) return;
+        doorStates[door].target = isOpen ? doorStates[door].max : 0;
+        updateDoorsBadge();
+      },
+
+      setLightsState: (headlightsOn, brakeOn, leftTurn, rightTurn) => {
+        headlights.forEach(l => l.intensity = headlightsOn ? 4.5 : 0);
+        taillights.forEach(l => l.intensity = brakeOn ? 5.0 : (headlightsOn ? 1.5 : 0));
+        document.getElementById('badge-lights').classList.toggle('active', headlightsOn);
+        document.getElementById('label-lights').innerText = headlightsOn ? "LIGHTS ON" : "LIGHTS AUTO";
+      },
+
+      setExteriorColor: (hexColor) => {
+        if (paintMaterial) {
+          paintMaterial.color.set(hexColor);
+        }
+      },
+
+      setSteeringAngle: (deg) => {
+        targetSteeringAngle = THREE.MathUtils.degToRad(deg);
+      },
+
+      setSpeed: (mph) => {
+        currentSpeedMph = mph;
+      },
+
+      setCameraPreset: (name) => {
+        setPreset(name);
+      }
+    };
+
+    function updateDoorsBadge() {
+      const anyOpen = Object.values(doorStates).some(s => s.target !== 0);
+      const badge = document.getElementById('badge-doors');
+      const label = document.getElementById('label-doors');
+      badge.classList.toggle('active', anyOpen);
+      label.innerText = anyOpen ? "DOOR OPEN" : "DOORS CLOSED";
+    }
+
+    window.setPreset = function(preset) {
+      document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
+      const activeBtn = Array.from(document.querySelectorAll('.cam-btn')).find(b => b.innerText.toLowerCase().includes(preset));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      switch (preset) {
+        case 'beauty':
+          animateCameraTo(-3.2, 1.8, 3.6, 0, 0.75, 0);
+          break;
+        case 'top':
+          animateCameraTo(0.01, 5.5, 0.2, 0, 0.5, 0);
+          break;
+        case 'driver':
+          animateCameraTo(-0.45, 1.25, 0.15, -0.38, 0.85, 0.75);
+          break;
+        case 'rear':
+          animateCameraTo(0, 1.6, -4.2, 0, 0.75, -0.5);
+          break;
+      }
+    };
+
+    function animateCameraTo(cx, cy, cz, tx, ty, tz) {
+      const startPos = camera.position.clone();
+      const targetPos = new THREE.Vector3(cx, cy, cz);
+      const startTarget = controls.target.clone();
+      const endTarget = new THREE.Vector3(tx, ty, tz);
+
+      let t = 0;
+      function stepCam() {
+        t += 0.04;
+        const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        camera.position.lerpVectors(startPos, targetPos, ease);
+        controls.target.lerpVectors(startTarget, endTarget, ease);
+        if (t < 1.0) requestAnimationFrame(stepCam);
+      }
+      stepCam();
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      const w = container.clientWidth || window.innerWidth;
+      const h = container.clientHeight || window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      // Smooth Door Hinge Interpolation
+      const doorSpeed = 0.12;
+      for (const [k, s] of Object.entries(doorStates)) {
+        s.current = THREE.MathUtils.lerp(s.current, s.target, doorSpeed);
+      }
+
+      if (doorFL) doorFL.rotation.z = doorStates.FL.current;
+      if (doorFR) doorFR.rotation.z = doorStates.FR.current;
+      if (doorRL) doorRL.rotation.z = doorStates.RL.current;
+      if (doorRR) doorRR.rotation.z = doorStates.RR.current;
+
+      // Steering Wheel & Front Wheels turning
+      currentSteeringAngle = THREE.MathUtils.lerp(currentSteeringAngle, targetSteeringAngle, 0.15);
+      if (steeringWheel) steeringWheel.rotation.y = currentSteeringAngle;
+      if (wheels[0]) wheels[0].rotation.y = currentSteeringAngle * 0.45;
+      if (wheels[1]) wheels[1].rotation.y = currentSteeringAngle * 0.45;
+
+      // Wheel Spin from Speed
+      if (currentSpeedMph > 0) {
+        const spinDelta = (currentSpeedMph * 0.05);
+        wheels.forEach(w => w.rotation.x += spinDelta);
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>

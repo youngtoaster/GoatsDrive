@@ -48,6 +48,10 @@ jobs:
         run: |
           ./gradlew :installer-app:assembleRelease --stacktrace
 
+      - name: Build CruzeOS Launcher APK
+        run: |
+          ./gradlew :launcher:assembleRelease --stacktrace
+
       - name: Prepare Release Artifacts
         run: |
           mkdir -p release-artifacts
@@ -69,6 +73,15 @@ jobs:
             cp installer-app/build/outputs/apk/debug/installer-app-debug.apk release-artifacts/GoatsInstaller.apk
           fi
 
+          # Copy CruzeOS 3D Launcher APK
+          if [ -f launcher/build/outputs/apk/release/launcher-release-unsigned.apk ]; then
+            cp launcher/build/outputs/apk/release/launcher-release-unsigned.apk release-artifacts/CruzeOS-Launcher.apk
+          elif [ -f launcher/build/outputs/apk/release/launcher-release.apk ]; then
+            cp launcher/build/outputs/apk/release/launcher-release.apk release-artifacts/CruzeOS-Launcher.apk
+          else
+            cp launcher/build/outputs/apk/debug/launcher-debug.apk release-artifacts/CruzeOS-Launcher.apk
+          fi
+
           echo "Artifacts prepared:"
           ls -la release-artifacts/
 
@@ -83,15 +96,16 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name == 'main' && 'v1.0.0' || github.ref_name }}
-          name: "GoatsDrive v1.0.0 — Zero-Copy Receiver, USB Installer & Sideload Deployer"
+          name: "GoatsDrive v1.0.0 — Zero-Copy Receiver, CruzeOS 3D Launcher & USB Sideload Deployer"
           body: |
-            ## ⚡ GoatsDrive v1.0.0 Release
+            ## ⚡ GoatsDrive & CruzeOS v1.0.0 Release
 
-            Ultra-lightweight, zero-copy Android Auto & CarPlay projection receiver designed for 2GB RAM aftermarket Android head units (FYT 7862/8581, Topway TS10/TS18, T3L).
+            Ultra-lightweight, zero-copy Android Auto & CarPlay projection receiver and next-gen 3D automotive home launcher suite designed for aftermarket Android head units (FYT 7862/8581, Topway TS10/TS18, T3L).
 
             ### 📦 Included APKs:
-            * **`GoatsDrive.apk`**: The zero-copy receiver engine running directly on the car head unit screen.
-            * **`GoatsInstaller.apk`**: Smart phone companion app supporting **direct USB cable installation**, custom APK sideloading, Wi-Fi ADB, live GitHub updates, and factory ZLink5 replacement.
+            * **`GoatsDrive.apk`**: Ultra-lightweight (<45MB RAM), zero-copy Android Auto / CarPlay receiver running on the car screen.
+            * **`CruzeOS-Launcher.apk`**: Next-gen Tesla/Rivian-style 3D home launcher for 2012 Chevy Cruze LTZ with real-time 3D model, CAN-bus telemetry, interactive doors/trunk, floating dual-zone climate HUD (works inside CarPlay/Android Auto), and customizable app drawer.
+            * **`GoatsInstaller.apk`**: Smart phone companion app supporting **direct USB cable installation**, custom APK sideloading, Wi-Fi ADB, and factory ZLink5 replacement.
 
             ### 🚀 Quick Install from Your Android Phone:
             1. Download and install **`GoatsInstaller.apk`** on your Android smartphone.
@@ -99,10 +113,12 @@ jobs:
                * **🔌 Direct USB Install:** Plug your phone into the head unit with a USB cable and tap **"Install via USB"**.
                * **📶 Wi-Fi / Hotspot Install:** Connect to the same network and tap **"Install via Wi-Fi"**.
             3. Choose what to install:
-               * **⚡ GoatsDrive Receiver:** Automatically fetches the latest build, suppresses factory ZLink5, installs GoatsDrive, and boots it onto your car screen.
+               * **⚡ GoatsDrive Receiver:** Automatically installs GoatsDrive, suppresses factory ZLink5, and boots it onto your car screen.
+               * **🚗 CruzeOS 3D Launcher:** Sideload `CruzeOS-Launcher.apk` directly to turn your head unit into a full 3D interactive cockpit.
                * **📁 Sideload Custom APK:** Pick any `.apk` on your phone (Spotify, Waze, YouTube Music, etc.) to install directly on the head unit without needing Google Play Store or a flash drive!
           files: |
             release-artifacts/GoatsDrive.apk
+            release-artifacts/CruzeOS-Launcher.apk
             release-artifacts/GoatsInstaller.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

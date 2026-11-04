@@ -9,6 +9,8 @@
 .cxx
 app/build/
 installer-app/build/
+launcher/build/
 *.apk
 !GoatsDrive.apk
 !GoatsInstaller.apk
+!CruzeOS-Launcher.apk
