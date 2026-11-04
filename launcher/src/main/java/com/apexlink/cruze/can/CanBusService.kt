@@ -5,7 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.os.Binder
 import android.os.Handler
 import android.os.IBinder
@@ -29,6 +29,7 @@ class CanBusService : Service() {
         val climateState = GmDeltaProtocol.ClimateState()
 
         private val listeners = CopyOnWriteArrayList<VehicleStateListener>()
+        private var uartOutputStream: FileOutputStream? = null
 
         fun registerListener(listener: VehicleStateListener) {
             listeners.add(listener)
@@ -48,7 +49,8 @@ class CanBusService : Service() {
         }
 
         /**
-         * Broadcasts a climate or vehicle command to aftermarket head unit MCU daemons.
+         * Broadcasts a climate or vehicle command to aftermarket head unit MCU daemons
+         * and writes directly to hardware UART if connected.
          */
         fun broadcastMcuCommand(context: Context, actionType: String, value: Int) {
             val targets = listOf(
@@ -69,13 +71,149 @@ class CanBusService : Service() {
                         putExtra("action", actionType)
                         putExtra("type", actionType)
                         putExtra("cmd", actionType)
+                        putExtra("command", actionType)
                         putExtra("value", value)
+                        putExtra("val", value)
                         putExtra("temp", value)
                         putExtra("fan", value)
                     }
                     context.sendBroadcast(intent)
                 } catch (ignored: Exception) {}
             }
+
+            // Direct UART transmission if MCU serial bus is open
+            uartOutputStream?.let { stream ->
+                try {
+                    val frame = encodeMcuFrame(actionType, value)
+                    if (frame != null) {
+                        stream.write(frame)
+                        stream.flush()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "UART write failed: ${e.message}")
+                }
+                Unit
+            }
+        }
+
+        /**
+         * Sends suppression/hide broadcasts to native MCU overlays (e.g. factory bottom AC bar).
+         */
+        fun hideFactoryBottomBar(context: Context) {
+            val hideActions = listOf(
+                "com.xyauto.aircondition.HIDE",
+                "com.ts.air.hide",
+                "com.fyt.air.hide",
+                "com.syu.air.hide",
+                "com.ts.canbus.hide",
+                "com.ts.key.ac.hide",
+                "com.microntek.aircondition.hide",
+                "action.hvac.hide"
+            )
+            hideActions.forEach { act ->
+                try {
+                    context.sendBroadcast(Intent(act))
+                } catch (ignored: Exception) {}
+            }
+        }
+
+        /**
+         * Adjusts head unit master volume via Android AudioManager and MCU.
+         */
+        fun adjustVolume(context: Context, direction: Int) {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (am != null) {
+                val dir = if (direction > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+                val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+                climateState.volumeLevel = current
+                climateState.isMuted = (current == 0)
+            } else {
+                climateState.volumeLevel = (climateState.volumeLevel + direction).coerceIn(0, 30)
+            }
+            broadcastMcuCommand(context, "SET_VOLUME", climateState.volumeLevel)
+            notifyUpdate()
+        }
+
+        fun toggleMute(context: Context) {
+            val am = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            climateState.isMuted = !climateState.isMuted
+            if (am != null) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    val dir = if (climateState.isMuted) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
+                    am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+                }
+            }
+            broadcastMcuCommand(context, "MUTE", if (climateState.isMuted) 1 else 0)
+            notifyUpdate()
+        }
+
+        /**
+         * Vehicle Control: Central Door Locks.
+         */
+        fun toggleDoorLocks(context: Context) {
+            vehicleState.doorsLocked = !vehicleState.doorsLocked
+            broadcastMcuCommand(context, "DOOR_LOCK", if (vehicleState.doorsLocked) 1 else 0)
+            notifyUpdate()
+        }
+
+        /**
+         * Vehicle Control: Solenoid Trunk Pop.
+         */
+        fun popTrunk(context: Context) {
+            vehicleState.trunkOpen = !vehicleState.trunkOpen
+            broadcastMcuCommand(context, "TRUNK_POP", 1)
+            notifyUpdate()
+        }
+
+        /**
+         * Vehicle Control: Front Fog Lamps.
+         */
+        fun toggleFogLights(context: Context) {
+            vehicleState.fogLightsOn = !vehicleState.fogLightsOn
+            broadcastMcuCommand(context, "TOGGLE_FOG_LIGHTS", if (vehicleState.fogLightsOn) 1 else 0)
+            notifyUpdate()
+        }
+
+        /**
+         * Vehicle Control: Hazard Flashers.
+         */
+        fun toggleHazardLights(context: Context) {
+            vehicleState.hazardLightsOn = !vehicleState.hazardLightsOn
+            broadcastMcuCommand(context, "TOGGLE_HAZARD", if (vehicleState.hazardLightsOn) 1 else 0)
+            notifyUpdate()
+        }
+
+        private fun encodeMcuFrame(cmd: String, value: Int): ByteArray? {
+            // Standard FYT / Raise MCU serial command packet: 0x2E, PID, LEN, DATA..., CHECKSUM
+            val pid = when (cmd) {
+                "SET_DRIVER_TEMP" -> 0x31
+                "SET_PASS_TEMP" -> 0x32
+                "SET_FAN_SPEED" -> 0x33
+                "TOGGLE_AC" -> 0x34
+                "TOGGLE_AUTO" -> 0x35
+                "TOGGLE_DUAL" -> 0x36
+                "TOGGLE_RECIRC" -> 0x37
+                "SET_DRIVER_SEAT" -> 0x38
+                "SET_PASS_SEAT" -> 0x39
+                "TOGGLE_FRONT_DEFROST" -> 0x3A
+                "TOGGLE_REAR_DEFROST" -> 0x3B
+                "SET_AIR_DIRECTION" -> 0x3C
+                "HVAC_POWER" -> 0x3D
+                "DOOR_LOCK" -> 0x40
+                "TRUNK_POP" -> 0x41
+                "SET_VOLUME" -> 0x50
+                "MUTE" -> 0x51
+                else -> 0x00
+            }
+            if (pid == 0x00) return null
+            val packet = ByteArray(5)
+            packet[0] = 0x2E.toByte()
+            packet[1] = pid.toByte()
+            packet[2] = 0x01.toByte() // 1 byte payload
+            packet[3] = (value and 0xFF).toByte()
+            packet[4] = ((packet[1] + packet[2] + packet[3]) and 0xFF).toByte() // simple checksum
+            return packet
         }
 
         /**
@@ -158,6 +296,10 @@ class CanBusService : Service() {
         super.onDestroy()
         isRunning = false
         serialThread?.interrupt()
+        try {
+            uartOutputStream?.close()
+        } catch (ignored: Exception) {}
+        uartOutputStream = null
     }
 
     private fun registerMcuBroadcasts() {
@@ -201,6 +343,9 @@ class CanBusService : Service() {
                 if (f.exists() && f.canRead()) {
                     try {
                         activeStream = FileInputStream(f)
+                        if (f.canWrite()) {
+                            uartOutputStream = FileOutputStream(f)
+                        }
                         Log.i(TAG, "Attached to hardware CAN port: $path")
                         break
                     } catch (ignored: Exception) {}

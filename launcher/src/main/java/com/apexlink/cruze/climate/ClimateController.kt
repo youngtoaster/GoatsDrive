@@ -6,45 +6,75 @@ import com.apexlink.cruze.can.GmDeltaProtocol
 
 /**
  * Controller managing the 2012 Chevrolet Cruze LTZ Dual-Zone HVAC & Seat Heaters.
- * Dispatches MCU broadcast packets and synchronizes with vehicle CAN-bus state.
+ * Dispatches MCU broadcast packets and synchronizes with vehicle CAN-bus state with zero lag.
  */
 object ClimateController {
 
     val state: GmDeltaProtocol.ClimateState
         get() = CanBusService.climateState
 
-    fun adjustDriverTemp(context: Context, delta: Float) {
-        val current = state.driverTempF
-        val next = (current + delta).coerceIn(60.0f, 85.0f)
-        state.driverTempF = Math.round(next * 2) / 2.0f
+    val vehicle: GmDeltaProtocol.VehicleState
+        get() = CanBusService.vehicleState
+
+    fun togglePower(context: Context) {
+        state.powerOn = !state.powerOn
+        CanBusService.broadcastMcuCommand(context, "HVAC_POWER", if (state.powerOn) 1 else 0)
+        CanBusService.notifyUpdate()
+    }
+
+    fun adjustDriverTemp(context: Context, deltaF: Float) {
+        state.powerOn = true
+        val isMetric = vehicle.useMetricUnits
+        if (isMetric) {
+            val deltaC = if (deltaF > 0) 0.5f else -0.5f
+            state.driverTempC = (state.driverTempC + deltaC).coerceIn(16.0f, 28.5f)
+            state.driverTempF = (state.driverTempC * 1.8f + 32f)
+        } else {
+            val nextF = (state.driverTempF + deltaF).coerceIn(60.0f, 85.0f)
+            state.driverTempF = Math.round(nextF * 2) / 2.0f
+            state.driverTempC = ((state.driverTempF - 32f) / 1.8f)
+        }
+
         if (state.dualZoneSync) {
             state.passengerTempF = state.driverTempF
+            state.passengerTempC = state.driverTempC
         }
         CanBusService.broadcastMcuCommand(context, "SET_DRIVER_TEMP", state.driverTempF.toInt())
         CanBusService.notifyUpdate()
     }
 
-    fun adjustPassengerTemp(context: Context, delta: Float) {
-        val current = state.passengerTempF
-        val next = (current + delta).coerceIn(60.0f, 85.0f)
-        state.passengerTempF = Math.round(next * 2) / 2.0f
+    fun adjustPassengerTemp(context: Context, deltaF: Float) {
+        state.powerOn = true
+        val isMetric = vehicle.useMetricUnits
+        if (isMetric) {
+            val deltaC = if (deltaF > 0) 0.5f else -0.5f
+            state.passengerTempC = (state.passengerTempC + deltaC).coerceIn(16.0f, 28.5f)
+            state.passengerTempF = (state.passengerTempC * 1.8f + 32f)
+        } else {
+            val nextF = (state.passengerTempF + deltaF).coerceIn(60.0f, 85.0f)
+            state.passengerTempF = Math.round(nextF * 2) / 2.0f
+            state.passengerTempC = ((state.passengerTempF - 32f) / 1.8f)
+        }
         state.dualZoneSync = false
         CanBusService.broadcastMcuCommand(context, "SET_PASS_TEMP", state.passengerTempF.toInt())
         CanBusService.notifyUpdate()
     }
 
     fun setFanSpeed(context: Context, speed: Int) {
+        state.powerOn = true
         state.fanSpeed = speed.coerceIn(0, 8)
         CanBusService.broadcastMcuCommand(context, "SET_FAN_SPEED", state.fanSpeed)
         CanBusService.notifyUpdate()
     }
 
-    fun stepFanSpeed(context: Context) {
-        val next = (state.fanSpeed + 1) % 9
+    fun stepFanSpeed(context: Context, delta: Int = 1) {
+        state.powerOn = true
+        val next = (state.fanSpeed + delta).coerceIn(0, 8)
         setFanSpeed(context, next)
     }
 
     fun toggleAc(context: Context) {
+        state.powerOn = true
         state.acEnabled = !state.acEnabled
         if (!state.acEnabled) state.maxAcEnabled = false
         CanBusService.broadcastMcuCommand(context, "TOGGLE_AC", if (state.acEnabled) 1 else 0)
@@ -52,11 +82,14 @@ object ClimateController {
     }
 
     fun toggleMaxAc(context: Context) {
+        state.powerOn = true
         state.maxAcEnabled = !state.maxAcEnabled
         if (state.maxAcEnabled) {
             state.acEnabled = true
             state.driverTempF = 60.0f
             state.passengerTempF = 60.0f
+            state.driverTempC = 16.0f
+            state.passengerTempC = 16.0f
             state.fanSpeed = 8
             state.recirculation = true
         }
@@ -65,8 +98,19 @@ object ClimateController {
     }
 
     fun toggleAuto(context: Context) {
+        state.powerOn = true
         state.autoMode = !state.autoMode
         CanBusService.broadcastMcuCommand(context, "TOGGLE_AUTO", if (state.autoMode) 1 else 0)
+        CanBusService.notifyUpdate()
+    }
+
+    fun toggleDual(context: Context) {
+        state.dualZoneSync = !state.dualZoneSync
+        if (state.dualZoneSync) {
+            state.passengerTempF = state.driverTempF
+            state.passengerTempC = state.driverTempC
+        }
+        CanBusService.broadcastMcuCommand(context, "TOGGLE_DUAL", if (state.dualZoneSync) 1 else 0)
         CanBusService.notifyUpdate()
     }
 
@@ -99,17 +143,40 @@ object ClimateController {
         CanBusService.notifyUpdate()
     }
 
+    fun cycleAirDirection(context: Context) {
+        val dirs = GmDeltaProtocol.AirDirection.values()
+        val next = dirs[(state.airDistribution.ordinal + 1) % dirs.size]
+        setAirDirection(context, next)
+    }
+
     fun cycleDriverSeatHeater(context: Context): Int {
-        state.driverSeatHeater = (state.driverSeatHeater + 1) % 4
-        CanBusService.broadcastMcuCommand(context, "SET_DRIVER_SEAT_HEATER", state.driverSeatHeater)
+        // Cycle: 0 -> 3 (High) -> 2 (Med) -> 1 (Low) -> 0 (Off)
+        state.driverSeatHeater = when (state.driverSeatHeater) {
+            0 -> 3
+            3 -> 2
+            2 -> 1
+            else -> 0
+        }
+        CanBusService.broadcastMcuCommand(context, "SET_DRIVER_SEAT", state.driverSeatHeater)
         CanBusService.notifyUpdate()
         return state.driverSeatHeater
     }
 
     fun cyclePassengerSeatHeater(context: Context): Int {
-        state.passengerSeatHeater = (state.passengerSeatHeater + 1) % 4
-        CanBusService.broadcastMcuCommand(context, "SET_PASS_SEAT_HEATER", state.passengerSeatHeater)
+        // Cycle: 0 -> 3 -> 2 -> 1 -> 0
+        state.passengerSeatHeater = when (state.passengerSeatHeater) {
+            0 -> 3
+            3 -> 2
+            2 -> 1
+            else -> 0
+        }
+        CanBusService.broadcastMcuCommand(context, "SET_PASS_SEAT", state.passengerSeatHeater)
         CanBusService.notifyUpdate()
         return state.passengerSeatHeater
+    }
+
+    fun toggleMetricUnits(context: Context) {
+        vehicle.useMetricUnits = !vehicle.useMetricUnits
+        CanBusService.notifyUpdate()
     }
 }

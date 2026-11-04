@@ -20,6 +20,7 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.*
 import com.apexlink.cruze.apps.AppDrawerManager
 import com.apexlink.cruze.apps.AppInfo
@@ -37,6 +38,9 @@ import java.util.Locale
 /**
  * Next-Gen Tesla/Rivian-inspired Automotive Home Launcher for vertical portrait head units
  * in the 2012 Chevrolet Cruze LTZ.
+ *
+ * Fully responsive, zero-lag CAN-bus integration, full-screen immersive mode, and complete
+ * bottom climate console replicating and upgrading the factory HVAC touch panel.
  */
 class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
 
@@ -51,6 +55,7 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     private lateinit var outsideTempText: TextView
     private lateinit var batteryVoltageText: TextView
     private lateinit var phoneStatusBadge: TextView
+    private lateinit var centralLockBadge: TextView
 
     // Projection Hero Card
     private lateinit var projectionStatusLabel: TextView
@@ -72,16 +77,24 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     private lateinit var tpmsRLText: TextView
     private lateinit var tpmsRRText: TextView
 
-    // Quick Climate Card
-    private lateinit var driverTempLabel: TextView
-    private lateinit var passengerTempLabel: TextView
-    private lateinit var fanSpeedLabel: TextView
-    private lateinit var acToggleBtn: Button
-    private lateinit var driverSeatBtn: Button
-    private lateinit var passSeatBtn: Button
-
-    // Bottom Navigation Dock
-    private lateinit var dockLayout: LinearLayout
+    // Bottom Luxury HVAC & Media Console (Replicating and upgrading factory bottom bar)
+    private lateinit var volumeLevelText: TextView
+    private lateinit var muteBtn: Button
+    private lateinit var hvacPowerBtn: Button
+    private lateinit var dualSyncBtn: Button
+    private lateinit var acCompressorBtn: Button
+    private lateinit var maxAcBtn: Button
+    private lateinit var recircBtn: Button
+    private lateinit var autoClimateBtn: Button
+    private lateinit var ventModeBtn: Button
+    private lateinit var frontDefrostBtn: Button
+    private lateinit var rearDefrostBtn: Button
+    private lateinit var driverTempText: TextView
+    private lateinit var passengerTempText: TextView
+    private lateinit var driverSeatHeaterBtn: Button
+    private lateinit var passengerSeatHeaterBtn: Button
+    private lateinit var fanSpeedBarsContainer: LinearLayout
+    private lateinit var fanSpeedLevelLabel: TextView
 
     // Clock updater
     private val clockRunnable = object : Runnable {
@@ -91,16 +104,28 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         }
     }
 
+    private val mediaListener: (MediaManager.TrackInfo) -> Unit = { track ->
+        runOnUiThread {
+            mediaTitleText.text = track.title
+            mediaArtistText.text = track.artist
+            mediaPlayPauseBtn.text = if (track.isPlaying) "⏸ Pause" else "▶ Play"
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        hideSystemUI()
+        applyFullscreenFlags()
 
-        // Start hardware CAN service
+        // Start hardware CAN background service
         startService(Intent(this, CanBusService::class.java))
+
+        // Suppress native Chinese MCU bottom bar overlay if present
+        CanBusService.hideFactoryBottomBar(this)
 
         val rootScrollView = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#07080B")) // Deep luxury obsidian
             isFillViewport = true
+            overScrollMode = View.OVER_SCROLL_NEVER
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -110,7 +135,7 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         val rootLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#07080B"))
-            setPadding(0, 0, 0, 12)
+            setPadding(0, 0, 0, 16)
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -118,85 +143,72 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
         }
         rootScrollView.addView(rootLayout)
 
-        // 1. Top Automotive Status Bar (52dp)
-        rootLayout.addView(createHeaderBar())
+        // 1. TOP AUTOMOTIVE STATUS BAR (Clock, Date, Outside Temp, Battery, Central Locks)
+        rootLayout.addView(buildTopStatusBar())
 
-        // 2. Full-Width 3D Cruze Stage (320dp height)
-        rootLayout.addView(create3dStage())
+        // 2. 3D CRUZE LTZ VIEWPORT STAGE (Instant 0ms procedural load + interactive doors)
+        rootLayout.addView(build3dCruzeStage())
 
-        // 3. Primary Automotive Cards (CarPlay/AA + Media)
-        rootLayout.addView(createPrimaryHeroCards())
+        // 3. PRIMARY HERO ROW (CarPlay / Android Auto + Media Player)
+        rootLayout.addView(buildHeroRow())
 
-        // 4. Secondary Control Cards (Climate Quick Deck + Telemetry)
-        rootLayout.addView(createSecondaryControlCards())
+        // 4. SECONDARY ROW (Instruments / TPMS + Vehicle BCM Controls)
+        rootLayout.addView(buildSecondaryRow())
 
-        // 5. Persistent Bottom Automotive Dock
-        dockLayout = createBottomDock()
-        rootLayout.addView(dockLayout)
+        // 5. MASTER HVAC CONSOLE (Complete, luxury copy & upgrade of factory bottom bar)
+        rootLayout.addView(buildMasterClimateConsole())
 
         setContentView(rootScrollView)
 
-        // Register CAN-bus listener
+        // Register CAN-bus listener & start clock
         CanBusService.registerListener(this)
+        mainHandler.post(clockRunnable)
 
-        // Media updates
-        MediaManager.registerListener { track ->
-            mediaTitleText.text = track.title
-            mediaArtistText.text = track.artist
-            mediaPlayPauseBtn.text = if (track.isPlaying) "⏸" else "▶"
-        }
-
-        // Check overlay permission for floating climate HUD
-        checkOverlayPermission()
+        // Listen for media changes
+        MediaManager.registerListener(mediaListener)
     }
 
     override fun onResume() {
         super.onResume()
-        hideSystemUI()
-        mainHandler.post(clockRunnable)
-        AppDrawerManager.loadInstalledApps(this)
+        applyFullscreenFlags()
+        CanBusService.hideFactoryBottomBar(this)
         updateProjectionUI()
-    }
-
-    override fun onPause() {
-        super.onPause()
-        mainHandler.removeCallbacks(clockRunnable)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         CanBusService.unregisterListener(this)
+        mainHandler.removeCallbacks(clockRunnable)
+        MediaManager.unregisterListener(mediaListener)
     }
 
-    private fun hideSystemUI() {
+    @Suppress("DEPRECATION")
+    private fun applyFullscreenFlags() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
+        window.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            or View.SYSTEM_UI_FLAG_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         )
     }
 
-    private fun updateClock() {
-        val now = Date()
-        clockTimeText.text = SimpleDateFormat("h:mm a", Locale.getDefault()).format(now)
-        clockDateText.text = SimpleDateFormat("EEEE, MMM d", Locale.getDefault()).format(now).uppercase()
-    }
-
-    private fun updateProjectionUI() {
-        val installed = ProjectionBridge.findInstalledProjectionPackage(this)
-        val engineName = installed?.second ?: "CarPlay / Android Auto"
-        projectionLaunchBtn.text = "⚡ Launch $engineName"
-        projectionStatusLabel.text = "● Connected via USB / Bluetooth"
-        projectionStatusLabel.setTextColor(Color.parseColor("#10B981"))
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            applyFullscreenFlags()
+            CanBusService.hideFactoryBottomBar(this)
+        }
     }
 
     // ==========================================
-    // 1. TOP AUTOMOTIVE STATUS HEADER
+    // 1. TOP AUTOMOTIVE STATUS BAR
     // ==========================================
-    private fun createHeaderBar(): LinearLayout {
+    private fun buildTopStatusBar(): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -207,635 +219,901 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
 
-            // Brand Mark
-            val brandLayout = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
-            }
-            val brandText = TextView(this@CruzeLauncherActivity).apply {
-                text = "CRUZE LTZ"
-                textSize = 15f
+            // Vehicle Badge & Central Lock Toggle
+            centralLockBadge = TextView(this@CruzeLauncherActivity).apply {
+                text = "⚡ CRUZE LTZ  🔒"
+                setTextColor(Color.parseColor("#00E5FF"))
+                textSize = 12f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#FFFFFF"))
-                letterSpacing = 0.12f
+                setPadding(10, 5, 10, 5)
+                background = createPillDrawable("#15202B", "#00E5FF")
+                setOnClickListener {
+                    CanBusService.toggleDoorLocks(this@CruzeLauncherActivity)
+                }
             }
-            brandLayout.addView(brandText)
+            addView(centralLockBadge)
 
-            phoneStatusBadge = TextView(this@CruzeLauncherActivity).apply {
-                text = "● PHONE CONNECTED"
-                textSize = 9.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#10B981"))
-                letterSpacing = 0.08f
-            }
-            brandLayout.addView(phoneStatusBadge)
-            addView(brandLayout)
-
-            // Center: Digital Clock
-            val clockLayout = LinearLayout(this@CruzeLauncherActivity).apply {
+            // Centered Clock & Date
+            val clockContainer = LinearLayout(this@CruzeLauncherActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.6f)
-            }
-            clockTimeText = TextView(this@CruzeLauncherActivity).apply {
-                text = "12:00 PM"
-                textSize = 22f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
-                gravity = Gravity.CENTER
-            }
-            clockLayout.addView(clockTimeText)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
 
-            clockDateText = TextView(this@CruzeLauncherActivity).apply {
-                text = "THURSDAY, NOV 5"
-                textSize = 10f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#8E9AA8"))
-                gravity = Gravity.CENTER
-                letterSpacing = 0.1f
-            }
-            clockLayout.addView(clockDateText)
-            addView(clockLayout)
+                clockTimeText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "12:00 PM"
+                    setTextColor(Color.WHITE)
+                    textSize = 18f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
+                addView(clockTimeText)
 
-            // Right: Telemetry Chips & Factory Settings Gear
-            val rightLayout = LinearLayout(this@CruzeLauncherActivity).apply {
+                clockDateText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "THURSDAY, NOV 5"
+                    setTextColor(Color.parseColor("#64748B"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    letterSpacing = 0.08f
+                }
+                addView(clockDateText)
+            }
+            addView(clockContainer)
+
+            // Outside Temp, Alternator Battery, and °F/°C Toggle
+            val statusCluster = LinearLayout(this@CruzeLauncherActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL or Gravity.END
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.2f)
+                gravity = Gravity.CENTER_VERTICAL
+
+                outsideTempText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "72°F"
+                    setTextColor(Color.parseColor("#E2E8F0"))
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(12, 6, 8, 6)
+                    setOnClickListener {
+                        ClimateController.toggleMetricUnits(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(outsideTempText)
+
+                batteryVoltageText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "14.2V"
+                    setTextColor(Color.parseColor("#10B981"))
+                    textSize = 12f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(8, 6, 12, 6)
+                }
+                addView(batteryVoltageText)
+
+                val carSettingsIcon = TextView(this@CruzeLauncherActivity).apply {
+                    text = "⚙"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 16f
+                    setPadding(10, 4, 10, 4)
+                    setOnClickListener {
+                        CanBusService.openNativeCarSettings(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(carSettingsIcon)
             }
-
-            outsideTempText = createStatusPill("72°F", "#00E5FF")
-            rightLayout.addView(outsideTempText)
-
-            batteryVoltageText = createStatusPill("14.2V", "#81C784")
-            rightLayout.addView(batteryVoltageText)
-
-            val gearBtn = Button(this@CruzeLauncherActivity).apply {
-                text = "⚙"
-                textSize = 17f
-                setTextColor(Color.parseColor("#8E9AA8"))
-                setBackgroundColor(Color.TRANSPARENT)
-                setPadding(8, 0, 8, 0)
-                setOnClickListener { CanBusService.openNativeCarSettings(this@CruzeLauncherActivity) }
-            }
-            rightLayout.addView(gearBtn)
-
-            addView(rightLayout)
+            addView(statusCluster)
         }
     }
 
-    private fun createStatusPill(text: String, accentHex: String): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = 11f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor(accentHex))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#141923"))
-                cornerRadius = 12f
-                setStroke(1, Color.parseColor("#222A3B"))
-            }
-            setPadding(10, 5, 10, 5)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(4, 0, 4, 0) }
-        }
+    private fun updateClock() {
+        val now = Date()
+        val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+        val dateFmt = SimpleDateFormat("EEEE, MMM d", Locale.US)
+        clockTimeText.text = timeFmt.format(now).uppercase()
+        clockDateText.text = dateFmt.format(now).uppercase()
     }
 
     // ==========================================
-    // 2. MAIN 3D CRUZE VIEWPORT STAGE
+    // 2. 3D CRUZE STAGE & QUICK ACTIONS
     // ==========================================
-    private fun create3dStage(): FrameLayout {
-        val stageFrame = FrameLayout(this).apply {
-            val displayMetrics = resources.displayMetrics
-            val stageHeight = (displayMetrics.heightPixels * 0.40f).toInt().coerceIn(600, 950)
+    private fun build3dCruzeStage(): View {
+        val stageContainer = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                stageHeight
-            ).apply { setMargins(12, 8, 12, 8) }
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0B0E14"))
-                cornerRadius = 20f
-                setStroke(1, Color.parseColor("#1B2230"))
-            }
+                dpToPx(320)
+            )
+            setBackgroundColor(Color.parseColor("#090B10"))
         }
 
-        // Hardware-accelerated WebView hosting Three.js PBR stage
+        // Hardware-Accelerated 3D WebGL Viewport
         cruzeViewport = Cruze3dViewportView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
             callback = object : Cruze3dViewportView.Callback {
-                override fun onModelReady() {
-                    // Ready
-                }
+                override fun onModelReady() {}
                 override fun onPartInteracted(part: String, isOpen: Boolean) {
-                    Toast.makeText(this@CruzeLauncherActivity, "$part ${if (isOpen) "Opened" else "Closed"}", Toast.LENGTH_SHORT).show()
+                    when (part) {
+                        "FL" -> CanBusService.vehicleState.doorFL = isOpen
+                        "FR" -> CanBusService.vehicleState.doorFR = isOpen
+                        "RL" -> CanBusService.vehicleState.doorRL = isOpen
+                        "RR" -> CanBusService.vehicleState.doorRR = isOpen
+                        "trunk" -> CanBusService.vehicleState.trunkOpen = isOpen
+                    }
+                    CanBusService.notifyUpdate()
                 }
             }
         }
-        stageFrame.addView(cruzeViewport)
+        stageContainer.addView(cruzeViewport)
 
-        // Floating Quick Vehicle Actions Bar (top-left of stage)
-        val actionPills = LinearLayout(this).apply {
+        // Top Overlay: Quick Vehicle Action Buttons (Doors, Trunk, Fog, Hazards)
+        val actionOverlay = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(12, 8, 12, 8)
+            gravity = Gravity.CENTER
+            setPadding(12, 10, 12, 0)
             layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.TOP or Gravity.START
-                setMargins(14, 14, 0, 0)
-            }
+                Gravity.TOP
+            )
+
+            addView(createQuickActionPill("DOORS") {
+                val anyOpen = CanBusService.vehicleState.doorFL || CanBusService.vehicleState.doorFR
+                val next = !anyOpen
+                CanBusService.vehicleState.doorFL = next
+                CanBusService.vehicleState.doorFR = next
+                cruzeViewport.setDoor("FL", next)
+                cruzeViewport.setDoor("FR", next)
+                CanBusService.notifyUpdate()
+            })
+
+            addView(createQuickActionPill("TRUNK") {
+                CanBusService.popTrunk(this@CruzeLauncherActivity)
+                cruzeViewport.setDoor("trunk", CanBusService.vehicleState.trunkOpen)
+            })
+
+            addView(createQuickActionPill("LIGHTS") {
+                val next = !CanBusService.vehicleState.headlightsOn
+                CanBusService.vehicleState.headlightsOn = next
+                cruzeViewport.setLights(next, brakeOn = false, leftSignal = false, rightSignal = false)
+                CanBusService.notifyUpdate()
+            })
+
+            addView(createQuickActionPill("FOG") {
+                CanBusService.toggleFogLights(this@CruzeLauncherActivity)
+            })
+
+            addView(createQuickActionPill("HAZARD") {
+                CanBusService.toggleHazardLights(this@CruzeLauncherActivity)
+            })
         }
+        stageContainer.addView(actionOverlay)
 
-        actionPills.addView(createStageButton("DOORS") {
-            val state = CanBusService.vehicleState
-            val nextOpen = !state.doorFL
-            cruzeViewport.setDoor("FL", nextOpen)
-            cruzeViewport.setDoor("FR", nextOpen)
-            CanBusService.broadcastMcuCommand(this, "TOGGLE_LOCK", if (nextOpen) 0 else 1)
-        })
-
-        actionPills.addView(createStageButton("TRUNK") {
-            val state = CanBusService.vehicleState
-            state.trunkOpen = !state.trunkOpen
-            cruzeViewport.setDoor("trunk", state.trunkOpen)
-            CanBusService.broadcastMcuCommand(this, "TOGGLE_TRUNK", if (state.trunkOpen) 1 else 0)
-        })
-
-        actionPills.addView(createStageButton("LIGHTS") {
-            val state = CanBusService.vehicleState
-            state.headlightsOn = !state.headlightsOn
-            cruzeViewport.setLights(state.headlightsOn, brakeOn = false, leftSignal = false, rightSignal = false)
-            CanBusService.broadcastMcuCommand(this, "TOGGLE_LIGHTS", if (state.headlightsOn) 1 else 0)
-        })
-
-        actionPills.addView(createStageButton("CAN SIM") {
-            showCanSimDialog()
-        })
-
-        stageFrame.addView(actionPills)
-
-        return stageFrame
+        return stageContainer
     }
 
-    private fun createStageButton(text: String, onClick: () -> Unit): Button {
-        return Button(this).apply {
+    private fun createQuickActionPill(text: String, onClick: () -> Unit): View {
+        return TextView(this).apply {
             this.text = text
-            textSize = 10.5f
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#C2CBD6"))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#CC121722"))
-                cornerRadius = 14f
-                setStroke(1, Color.parseColor("#263248"))
-            }
-            setPadding(12, 6, 12, 6)
-            layoutParams = LinearLayout.LayoutParams(
+            gravity = Gravity.CENTER
+            setPadding(14, 6, 14, 6)
+            background = createPillDrawable("#151B26", "#2D3748")
+            val params = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(3, 0, 3, 0) }
-            setOnClickListener { onClick() }
+            ).apply { setMargins(4, 0, 4, 0) }
+            layoutParams = params
+            setOnClickListener {
+                it.animate().scaleX(0.92f).scaleY(0.92f).setDuration(70).withEndAction {
+                    it.animate().scaleX(1.0f).scaleY(1.0f).setDuration(70).start()
+                }.start()
+                onClick()
+            }
         }
     }
 
     // ==========================================
-    // 3. PRIMARY HERO CARDS (CARPLAY/AA + MEDIA)
+    // 3. PRIMARY HERO ROW (CarPlay / AA + Audio)
     // ==========================================
-    private fun createPrimaryHeroCards(): LinearLayout {
+    private fun buildHeroRow(): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(12, 0, 12, 8)
+            setPadding(14, 10, 14, 6)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
 
-            // Card 1: CarPlay & Android Auto Hero
+            // Card 1: CarPlay & Android Auto Hero Card
             val projectionCard = createCardLayout().apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = 6
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    setMargins(0, 0, 6, 0)
                 }
-            }
 
-            val cardTitle = createCardHeader("PHONE PROJECTION", "#00E5FF")
-            projectionCard.addView(cardTitle)
+                addView(createCardHeader("PHONE PROJECTION", "#00E5FF"))
 
-            projectionStatusLabel = TextView(this@CruzeLauncherActivity).apply {
-                text = "● Connected via USB / Bluetooth"
-                textSize = 11.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#10B981"))
-                setPadding(0, 4, 0, 10)
-            }
-            projectionCard.addView(projectionStatusLabel)
-
-            projectionLaunchBtn = Button(this@CruzeLauncherActivity).apply {
-                text = "⚡ Launch CarPlay / Android Auto"
-                textSize = 13.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#080A0E"))
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#00E5FF"))
-                    cornerRadius = 14f
+                projectionStatusLabel = TextView(this@CruzeLauncherActivity).apply {
+                    text = "● Connected via USB / Bluetooth"
+                    setTextColor(Color.parseColor("#10B981"))
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    setPadding(0, 4, 0, 8)
                 }
-                setPadding(16, 12, 16, 12)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                setOnClickListener {
-                    ProjectionBridge.launchProjection(this@CruzeLauncherActivity)
-                }
-            }
-            projectionCard.addView(projectionLaunchBtn)
+                addView(projectionStatusLabel)
 
-            climateOverlaySwitch = CheckBox(this@CruzeLauncherActivity).apply {
-                text = "Keep Climate Floating HUD over Navigation"
-                isChecked = true
-                setTextColor(Color.parseColor("#8E9AA8"))
-                textSize = 11f
-                setPadding(6, 8, 0, 0)
-                setOnCheckedChangeListener { _, isChecked ->
-                    if (isChecked && Settings.canDrawOverlays(this@CruzeLauncherActivity)) {
-                        FloatingClimateOverlayService.start(this@CruzeLauncherActivity)
-                    } else if (!isChecked) {
-                        FloatingClimateOverlayService.stop(this@CruzeLauncherActivity)
+                // The Clean, Modern Projection Button (CarPlay / Android Auto)
+                projectionLaunchBtn = Button(this@CruzeLauncherActivity).apply {
+                    text = "⚡ CarPlay / Android Auto"
+                    setTextColor(Color.parseColor("#08090E"))
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = createGradientDrawable("#00E5FF", "#10B981", 12f)
+                    setPadding(12, 14, 12, 14)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(48)
+                    )
+                    setOnClickListener {
+                        it.animate().scaleX(0.95f).scaleY(0.95f).setDuration(70).withEndAction {
+                            it.animate().scaleX(1.0f).scaleY(1.0f).setDuration(70).start()
+                        }.start()
+                        ProjectionBridge.launchProjection(this@CruzeLauncherActivity)
                     }
                 }
+                addView(projectionLaunchBtn)
+
+                climateOverlaySwitch = CheckBox(this@CruzeLauncherActivity).apply {
+                    text = "Keep Climate Floating HUD over CarPlay/AA"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    isChecked = true
+                    setPadding(6, 6, 0, 0)
+                    setOnCheckedChangeListener { _, isChecked ->
+                        if (isChecked) FloatingClimateOverlayService.start(this@CruzeLauncherActivity)
+                        else FloatingClimateOverlayService.stop(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(climateOverlaySwitch)
             }
-            projectionCard.addView(climateOverlaySwitch)
             addView(projectionCard)
 
-            // Card 2: Universal Automotive Media Player
+            // Card 2: Audio System Media Card
             val mediaCard = createCardLayout().apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = 6
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    setMargins(6, 0, 0, 0)
                 }
+
+                addView(createCardHeader("AUDIO SYSTEM", "#38BDF8"))
+
+                mediaTitleText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "Cruze Audio"
+                    setTextColor(Color.WHITE)
+                    textSize = 13f
+                    typeface = Typeface.DEFAULT_BOLD
+                    maxLines = 1
+                    setPadding(0, 4, 0, 2)
+                }
+                addView(mediaTitleText)
+
+                mediaArtistText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "Bluetooth Connected"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 11f
+                    maxLines = 1
+                    setPadding(0, 0, 0, 8)
+                }
+                addView(mediaArtistText)
+
+                // Playback Transport Buttons
+                val transportRow = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(44)
+                    )
+
+                    val prevBtn = createTactileButton("⏮") {
+                        MediaManager.skipPrevious(this@CruzeLauncherActivity)
+                    }
+                    addView(prevBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(0, 0, 4, 0) })
+
+                    mediaPlayPauseBtn = createTactileButton("▶ Play") {
+                        MediaManager.togglePlayPause(this@CruzeLauncherActivity)
+                    }
+                    addView(mediaPlayPauseBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.4f).apply { setMargins(2, 0, 2, 0) })
+
+                    val nextBtn = createTactileButton("⏭") {
+                        MediaManager.skipNext(this@CruzeLauncherActivity)
+                    }
+                    addView(nextBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(4, 0, 0, 0) })
+                }
+                addView(transportRow)
             }
-
-            val mediaHeader = createCardHeader("AUDIO SYSTEM", "#81C784")
-            mediaCard.addView(mediaHeader)
-
-            mediaTitleText = TextView(this@CruzeLauncherActivity).apply {
-                text = "Cruze Audio System"
-                textSize = 13.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
-                maxLines = 1
-                setPadding(0, 4, 0, 2)
-            }
-            mediaCard.addView(mediaTitleText)
-
-            mediaArtistText = TextView(this@CruzeLauncherActivity).apply {
-                text = "Bluetooth / Car Radio Active"
-                textSize = 11.5f
-                setTextColor(Color.parseColor("#8E9AA8"))
-                maxLines = 1
-                setPadding(0, 0, 0, 10)
-            }
-            mediaCard.addView(mediaArtistText)
-
-            val mediaControlsRow = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-            }
-
-            val prevBtn = createMediaButton("⏮") { MediaManager.skipPrevious(this@CruzeLauncherActivity) }
-            mediaControlsRow.addView(prevBtn)
-
-            mediaPlayPauseBtn = createMediaButton("⏸") { MediaManager.togglePlayPause(this@CruzeLauncherActivity) }
-            mediaControlsRow.addView(mediaPlayPauseBtn)
-
-            val nextBtn = createMediaButton("⏭") { MediaManager.skipNext(this@CruzeLauncherActivity) }
-            mediaControlsRow.addView(nextBtn)
-
-            mediaCard.addView(mediaControlsRow)
             addView(mediaCard)
         }
     }
 
-    private fun createMediaButton(icon: String, onClick: () -> Unit): Button {
-        return Button(this).apply {
-            text = icon
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#19212E"))
-                cornerRadius = 14f
-                setStroke(1, Color.parseColor("#273448"))
-            }
-            layoutParams = LinearLayout.LayoutParams(0, 46, 1f).apply {
-                setMargins(4, 0, 4, 0)
-            }
-            setOnClickListener { onClick() }
+    private fun updateProjectionUI() {
+        val installed = ProjectionBridge.findInstalledProjectionPackage(this)
+        projectionLaunchBtn.text = "⚡ CarPlay / Android Auto"
+        if (installed != null) {
+            projectionStatusLabel.text = "● Ready to Connect (USB / BT)"
+            projectionStatusLabel.setTextColor(Color.parseColor("#10B981"))
+        } else {
+            projectionStatusLabel.text = "○ Connect Phone via USB or BT"
+            projectionStatusLabel.setTextColor(Color.parseColor("#94A3B8"))
         }
     }
 
     // ==========================================
-    // 4. SECONDARY CARDS (TELEMETRY + QUICK CLIMATE)
+    // 4. SECONDARY ROW (Telemetry & Car Settings)
     // ==========================================
-    private fun createSecondaryControlCards(): LinearLayout {
+    private fun buildSecondaryRow(): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(12, 0, 12, 10)
+            setPadding(14, 6, 14, 10)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
 
-            // Card 3: Instrument Telemetry & TPMS
-            val telemCard = createCardLayout().apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginEnd = 6
+            // Card 3: Instruments & 4-Wheel TPMS
+            val telemetryCard = createCardLayout().apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    setMargins(0, 0, 6, 0)
                 }
-            }
-            telemCard.addView(createCardHeader("INSTRUMENTS & TPMS", "#FFB74D"))
 
-            val gaugeRow = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 4, 0, 8)
+                addView(createCardHeader("INSTRUMENTS & TPMS", "#F59E0B"))
+
+                val gaugesRow = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 4, 0, 4)
+
+                    speedGaugeText = TextView(this@CruzeLauncherActivity).apply {
+                        text = "0 MPH"
+                        setTextColor(Color.WHITE)
+                        textSize = 18f
+                        typeface = Typeface.DEFAULT_BOLD
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                    }
+                    addView(speedGaugeText)
+
+                    rpmGaugeText = TextView(this@CruzeLauncherActivity).apply {
+                        text = "0 RPM"
+                        setTextColor(Color.parseColor("#94A3B8"))
+                        textSize = 14f
+                        typeface = Typeface.DEFAULT_BOLD
+                        gravity = Gravity.END
+                        layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f)
+                    }
+                    addView(rpmGaugeText)
+                }
+                addView(gaugesRow)
+
+                // Fuel bar
+                val fuelRow = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, 2, 0, 6)
+
+                    fuelProgressBar = ProgressBar(this@CruzeLauncherActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        progress = 85
+                        max = 100
+                        layoutParams = LinearLayout.LayoutParams(0, dpToPx(6), 1.0f)
+                    }
+                    addView(fuelProgressBar)
+
+                    fuelPercentText = TextView(this@CruzeLauncherActivity).apply {
+                        text = " 85%"
+                        setTextColor(Color.parseColor("#F59E0B"))
+                        textSize = 11f
+                        typeface = Typeface.DEFAULT_BOLD
+                    }
+                    addView(fuelPercentText)
+                }
+                addView(fuelRow)
+
+                // 4-Wheel TPMS Grid
+                val tpmsGrid = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    setPadding(0, 4, 0, 0)
+
+                    tpmsFLText = createTpmsLabel("FL: 32")
+                    tpmsFRText = createTpmsLabel("FR: 32")
+                    tpmsRLText = createTpmsLabel("RL: 32")
+                    tpmsRRText = createTpmsLabel("RR: 32")
+
+                    addView(tpmsFLText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(tpmsFRText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(tpmsRLText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(tpmsRRText, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                }
+                addView(tpmsGrid)
             }
-            speedGaugeText = TextView(this@CruzeLauncherActivity).apply {
-                text = "0 MPH"
-                textSize = 18f
+            addView(telemetryCard)
+
+            // Card 4: Vehicle BCM Controls & Factory Car Settings
+            val bcmCard = createCardLayout().apply {
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f).apply {
+                    setMargins(6, 0, 0, 0)
+                }
+
+                addView(createCardHeader("VEHICLE SYSTEMS (GM BCM)", "#10B981"))
+
+                val btnRow1 = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 4, 0, 4)
+
+                    val lockBtn = createTactileButton("🔒 Lock") {
+                        CanBusService.toggleDoorLocks(this@CruzeLauncherActivity)
+                    }
+                    val trunkBtn = createTactileButton("🚗 Trunk") {
+                        CanBusService.popTrunk(this@CruzeLauncherActivity)
+                    }
+                    addView(lockBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
+                    addView(trunkBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
+                }
+                addView(btnRow1)
+
+                val btnRow2 = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(0, 2, 0, 4)
+
+                    val fogBtn = createTactileButton("💡 Fog Lamps") {
+                        CanBusService.toggleFogLights(this@CruzeLauncherActivity)
+                    }
+                    val hazardBtn = createTactileButton("⚠ Hazards") {
+                        CanBusService.toggleHazardLights(this@CruzeLauncherActivity)
+                    }
+                    addView(fogBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(0, 0, 4, 0) })
+                    addView(hazardBtn, LinearLayout.LayoutParams(0, dpToPx(38), 1f).apply { setMargins(4, 0, 0, 0) })
+                }
+                addView(btnRow2)
+
+                // Factory Car Settings launcher button
+                val factorySettingsBtn = Button(this@CruzeLauncherActivity).apply {
+                    text = "⚙ Factory Car Settings"
+                    setTextColor(Color.WHITE)
+                    textSize = 11f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = createButtonDrawable("#1E293B", "#334155", 8f)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(36)
+                    ).apply { setMargins(0, 4, 0, 0) }
+                    setOnClickListener {
+                        CanBusService.openNativeCarSettings(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(factorySettingsBtn)
+            }
+            addView(bcmCard)
+        }
+    }
+
+    private fun createTpmsLabel(label: String): TextView {
+        return TextView(this).apply {
+            text = label
+            setTextColor(Color.parseColor("#94A3B8"))
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setPadding(4, 4, 4, 4)
+            background = createPillDrawable("#151D28", "#1E293B")
+        }
+    }
+
+    // ==========================================
+    // 5. MASTER HVAC CLIMATE CONSOLE (Complete Upgrade of Factory Bottom Bar)
+    // ==========================================
+    private fun buildMasterClimateConsole(): View {
+        val consoleLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#0C0E14"))
+            setPadding(12, 10, 12, 12)
+            background = createCardDrawable("#0C0E14", "#1E293B", 16f)
+            val params = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(14, 4, 14, 14) }
+            layoutParams = params
+        }
+
+        // Section Title & Units Toggle
+        val titleRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(4, 0, 4, 8)
+
+            val title = TextView(this@CruzeLauncherActivity).apply {
+                text = "AUTOMOTIVE CLIMATE & COCKPIT CONSOLE"
+                setTextColor(Color.parseColor("#00E5FF"))
+                textSize = 11f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
+                letterSpacing = 0.08f
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             }
-            gaugeRow.addView(speedGaugeText)
+            addView(title)
 
-            rpmGaugeText = TextView(this@CruzeLauncherActivity).apply {
-                text = "0 RPM"
-                textSize = 13f
+            val unitSwitch = TextView(this@CruzeLauncherActivity).apply {
+                text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C (METRIC)" else "UNIT: °F (IMPERIAL)"
+                setTextColor(Color.parseColor("#94A3B8"))
+                textSize = 10f
                 typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#8E9AA8"))
-                gravity = Gravity.END
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            gaugeRow.addView(rpmGaugeText)
-            telemCard.addView(gaugeRow)
-
-            // Fuel bar
-            val fuelHeaderRow = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-            }
-            val fuelLabel = TextView(this@CruzeLauncherActivity).apply {
-                text = "Fuel Level"
-                textSize = 10.5f
-                setTextColor(Color.parseColor("#8E9AA8"))
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-            }
-            fuelHeaderRow.addView(fuelLabel)
-
-            fuelPercentText = TextView(this@CruzeLauncherActivity).apply {
-                text = "85%"
-                textSize = 10.5f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#81C784"))
-            }
-            fuelHeaderRow.addView(fuelPercentText)
-            telemCard.addView(fuelHeaderRow)
-
-            fuelProgressBar = ProgressBar(this@CruzeLauncherActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
-                progress = 85
-                max = 100
-                progressDrawable = GradientDrawable().apply {
-                    setColor(Color.parseColor("#81C784"))
-                    cornerRadius = 4f
-                }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    7
-                ).apply { setMargins(0, 3, 0, 8) }
-            }
-            telemCard.addView(fuelProgressBar)
-
-            // TPMS 4-Corner Grid
-            val tpmsGrid = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-            }
-            tpmsFLText = createTpmsItem("FL 32 PSI")
-            tpmsGrid.addView(tpmsFLText)
-            tpmsFRText = createTpmsItem("FR 32 PSI")
-            tpmsGrid.addView(tpmsFRText)
-            tpmsRLText = createTpmsItem("RL 32 PSI")
-            tpmsGrid.addView(tpmsRLText)
-            tpmsRRText = createTpmsItem("RR 32 PSI")
-            tpmsGrid.addView(tpmsRRText)
-            telemCard.addView(tpmsGrid)
-
-            addView(telemCard)
-
-            // Card 4: Quick Dual-Zone Climate & Factory Car Settings
-            val climateCard = createCardLayout().apply {
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    marginStart = 6
+                setPadding(10, 4, 10, 4)
+                background = createPillDrawable("#15202B", "#00E5FF")
+                setOnClickListener {
+                    ClimateController.toggleMetricUnits(this@CruzeLauncherActivity)
+                    text = if (CanBusService.vehicleState.useMetricUnits) "UNIT: °C (METRIC)" else "UNIT: °F (IMPERIAL)"
                 }
             }
-            climateCard.addView(createCardHeader("HVAC & VEHICLE CONSOLE", "#80D8FF"))
+            addView(unitSwitch)
+        }
+        consoleLayout.addView(titleRow)
 
-            // Dual Temps & Blower
-            val tempsRow = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 4, 0, 8)
-            }
-            driverTempLabel = createTempBox("DRIVER", "68°") {
-                ClimateController.adjustDriverTemp(this@CruzeLauncherActivity, 1.0f)
-            }
-            tempsRow.addView(driverTempLabel)
+        // ROW A: MASTER HVAC MODE STRIP (OFF, DUAL, A/C, MAX A/C, RECIRC, AUTO, VENT, DEFROST)
+        val modeStrip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(44)
+            )
 
-            fanSpeedLabel = createTempBox("FAN", "3") {
-                ClimateController.stepFanSpeed(this@CruzeLauncherActivity)
+            hvacPowerBtn = createHvacModeBtn("OFF", active = false) {
+                ClimateController.togglePower(this@CruzeLauncherActivity)
             }
-            tempsRow.addView(fanSpeedLabel)
+            addView(hvacPowerBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(2, 0, 2, 0) })
 
-            passengerTempLabel = createTempBox("PASS", "70°") {
-                ClimateController.adjustPassengerTemp(this@CruzeLauncherActivity, 1.0f)
+            dualSyncBtn = createHvacModeBtn("DUAL", active = true) {
+                ClimateController.toggleDual(this@CruzeLauncherActivity)
             }
-            tempsRow.addView(passengerTempLabel)
-            climateCard.addView(tempsRow)
+            addView(dualSyncBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(2, 0, 2, 0) })
 
-            // Seat Heaters & AC Toggle
-            val seatRow = LinearLayout(this@CruzeLauncherActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 0, 0, 8)
-            }
-            driverSeatBtn = createSmallButton("D-SEAT 0") {
-                val s = ClimateController.cycleDriverSeatHeater(this@CruzeLauncherActivity)
-                driverSeatBtn.text = "D-SEAT $s"
-                driverSeatBtn.setTextColor(if (s > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
-            }
-            seatRow.addView(driverSeatBtn)
-
-            acToggleBtn = createSmallButton("A/C ON") {
+            acCompressorBtn = createHvacModeBtn("❄ A/C", active = true) {
                 ClimateController.toggleAc(this@CruzeLauncherActivity)
             }
-            seatRow.addView(acToggleBtn)
+            addView(acCompressorBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(2, 0, 2, 0) })
 
-            passSeatBtn = createSmallButton("P-SEAT 0") {
-                val s = ClimateController.cyclePassengerSeatHeater(this@CruzeLauncherActivity)
-                passSeatBtn.text = "P-SEAT $s"
-                passSeatBtn.setTextColor(if (s > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
+            maxAcBtn = createHvacModeBtn("MAX A/C", active = false) {
+                ClimateController.toggleMaxAc(this@CruzeLauncherActivity)
             }
-            seatRow.addView(passSeatBtn)
-            climateCard.addView(seatRow)
+            addView(maxAcBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.2f).apply { setMargins(2, 0, 2, 0) })
 
-            // Direct 1-Tap Launcher into Car's Factory Settings & Climate Console
-            val factorySettingsBtn = Button(this@CruzeLauncherActivity).apply {
-                text = "⚙️ Factory Car Settings & AC"
-                textSize = 12f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1E2738"))
-                    cornerRadius = 12f
-                    setStroke(1, Color.parseColor("#34435C"))
-                }
-                setPadding(10, 8, 10, 8)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                setOnClickListener {
-                    CanBusService.openNativeCarSettings(this@CruzeLauncherActivity)
-                }
+            recircBtn = createHvacModeBtn("↻ RECIRC", active = false) {
+                ClimateController.toggleRecirculation(this@CruzeLauncherActivity)
             }
-            climateCard.addView(factorySettingsBtn)
+            addView(recircBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.2f).apply { setMargins(2, 0, 2, 0) })
 
-            addView(climateCard)
+            autoClimateBtn = createHvacModeBtn("AUTO", active = true) {
+                ClimateController.toggleAuto(this@CruzeLauncherActivity)
+            }
+            addView(autoClimateBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(2, 0, 2, 0) })
+
+            ventModeBtn = createHvacModeBtn("VENT", active = true) {
+                ClimateController.cycleAirDirection(this@CruzeLauncherActivity)
+            }
+            addView(ventModeBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { setMargins(2, 0, 2, 0) })
+
+            frontDefrostBtn = createHvacModeBtn("DEFROST", active = false) {
+                ClimateController.toggleFrontDefrost(this@CruzeLauncherActivity)
+            }
+            addView(frontDefrostBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.2f).apply { setMargins(2, 0, 2, 0) })
         }
-    }
+        consoleLayout.addView(modeStrip)
 
-    private fun createTempBox(label: String, initial: String, onClick: () -> Unit): TextView {
-        return TextView(this).apply {
-            text = "$label\n$initial"
-            textSize = 11.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#151D2A"))
-                cornerRadius = 10f
-            }
-            setPadding(8, 6, 8, 6)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                setMargins(2, 0, 2, 0)
-            }
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun createSmallButton(text: String, onClick: () -> Unit): Button {
-        return Button(this).apply {
-            this.text = text
-            textSize = 10.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#8E9AA8"))
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#151D2A"))
-                cornerRadius = 10f
-            }
-            setPadding(4, 4, 4, 4)
-            layoutParams = LinearLayout.LayoutParams(0, 38, 1f).apply {
-                setMargins(2, 0, 2, 0)
-            }
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun createTpmsItem(text: String): TextView {
-        return TextView(this).apply {
-            this.text = text
-            textSize = 9.5f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.parseColor("#C2CBD6"))
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#141A24"))
-                cornerRadius = 8f
-            }
-            setPadding(6, 4, 6, 4)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                setMargins(2, 0, 2, 0)
-            }
-        }
-    }
-
-    // ==========================================
-    // 5. BOTTOM AUTOMOTIVE DOCK
-    // ==========================================
-    private fun createBottomDock(): LinearLayout {
-        return LinearLayout(this).apply {
+        // ROW B: COMFORT PODS (Driver Temp, Heated Seats, Blower Speed, Passenger Temp, Volume)
+        val comfortRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(16, 8, 16, 8)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0F131C"))
-                cornerRadius = 20f
-                setStroke(1, Color.parseColor("#222A3B"))
-            }
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 10, 0, 6)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                setMargins(16, 4, 16, 12)
-            }
+            )
 
-            addView(createDockItem("⊞", "Apps") { showAppDrawerSheet() })
-            addView(createDockItem("⚡", "CarPlay") { ProjectionBridge.launchProjection(this@CruzeLauncherActivity) })
-            addView(createDockItem("🚗", "Vehicle") { cruzeViewport.setCameraPreset("beauty") })
-            addView(createDockItem("❄", "Climate") {
-                if (FloatingClimateOverlayService.isOverlayActive) {
-                    FloatingClimateOverlayService.stop(this@CruzeLauncherActivity)
-                } else if (Settings.canDrawOverlays(this@CruzeLauncherActivity)) {
-                    FloatingClimateOverlayService.start(this@CruzeLauncherActivity)
-                } else {
-                    checkOverlayPermission()
+            // 1. VOLUME POD (Vol +, Level, Vol -)
+            val volPod = LinearLayout(this@CruzeLauncherActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(8, 6, 8, 6)
+                background = createCardDrawable("#121620", "#1E293B", 10f)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(72), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(0, 0, 6, 0)
                 }
-            })
-            addView(createDockItem("⚙", "Car Setup") { CanBusService.openNativeCarSettings(this@CruzeLauncherActivity) })
+
+                val volUpBtn = createMicroButton("▲ VOL") {
+                    CanBusService.adjustVolume(this@CruzeLauncherActivity, 1)
+                }
+                addView(volUpBtn)
+
+                volumeLevelText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "14"
+                    setTextColor(Color.parseColor("#00E5FF"))
+                    textSize = 16f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(0, 4, 0, 4)
+                }
+                addView(volumeLevelText)
+
+                val volDownBtn = createMicroButton("▼ VOL") {
+                    CanBusService.adjustVolume(this@CruzeLauncherActivity, -1)
+                }
+                addView(volDownBtn)
+            }
+            addView(volPod)
+
+            // 2. DRIVER TEMPERATURE & SEAT HEATER POD
+            val driverPod = LinearLayout(this@CruzeLauncherActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(8, 6, 8, 6)
+                background = createCardDrawable("#121620", "#1E293B", 10f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f).apply {
+                    setMargins(2, 0, 4, 0)
+                }
+
+                val driverHeader = TextView(this@CruzeLauncherActivity).apply {
+                    text = "DRIVER"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                addView(driverHeader)
+
+                driverTempText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "22.5°C"
+                    setTextColor(Color.WHITE)
+                    textSize = 18f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(0, 2, 0, 4)
+                }
+                addView(driverTempText)
+
+                // Temp Steppers
+                val steppers = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+
+                    val minusBtn = createMicroButton("−") {
+                        ClimateController.adjustDriverTemp(this@CruzeLauncherActivity, -1.0f)
+                    }
+                    val plusBtn = createMicroButton("+") {
+                        ClimateController.adjustDriverTemp(this@CruzeLauncherActivity, 1.0f)
+                    }
+                    addView(minusBtn, LinearLayout.LayoutParams(dpToPx(38), dpToPx(32)).apply { setMargins(0, 0, 4, 0) })
+                    addView(plusBtn, LinearLayout.LayoutParams(dpToPx(38), dpToPx(32)))
+                }
+                addView(steppers)
+
+                // 3-Stage Heated Seat Button (0 -> 3 -> 2 -> 1 -> 0)
+                driverSeatHeaterBtn = Button(this@CruzeLauncherActivity).apply {
+                    text = "💺 SEAT 0"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = createButtonDrawable("#1A202C", "#2D3748", 6f)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(32)
+                    ).apply { setMargins(0, 6, 0, 0) }
+                    setOnClickListener {
+                        ClimateController.cycleDriverSeatHeater(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(driverSeatHeaterBtn)
+            }
+            addView(driverPod)
+
+            // 3. CENTER BLOWER FAN SPEED CONTROLLER
+            val fanPod = LinearLayout(this@CruzeLauncherActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(8, 6, 8, 6)
+                background = createCardDrawable("#121620", "#1E293B", 10f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply {
+                    setMargins(2, 0, 2, 0)
+                }
+
+                fanSpeedLevelLabel = TextView(this@CruzeLauncherActivity).apply {
+                    text = "FAN SPEED 3"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
+                addView(fanSpeedLevelLabel)
+
+                // 8-Segment Fan Speed LED Bar
+                fanSpeedBarsContainer = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+                    setPadding(0, 8, 0, 8)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(24)
+                    )
+                    renderFanSpeedSegments(this, 3)
+                }
+                addView(fanSpeedBarsContainer)
+
+                // Fan Speed Steppers
+                val fanSteppers = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+
+                    val fanDown = createMicroButton("FAN −") {
+                        ClimateController.stepFanSpeed(this@CruzeLauncherActivity, -1)
+                    }
+                    val fanUp = createMicroButton("FAN +") {
+                        ClimateController.stepFanSpeed(this@CruzeLauncherActivity, 1)
+                    }
+                    addView(fanDown, LinearLayout.LayoutParams(0, dpToPx(32), 1f).apply { setMargins(0, 0, 4, 0) })
+                    addView(fanUp, LinearLayout.LayoutParams(0, dpToPx(32), 1f).apply { setMargins(4, 0, 0, 0) })
+                }
+                addView(fanSteppers)
+            }
+            addView(fanPod)
+
+            // 4. PASSENGER TEMPERATURE & SEAT HEATER POD
+            val passPod = LinearLayout(this@CruzeLauncherActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(8, 6, 8, 6)
+                background = createCardDrawable("#121620", "#1E293B", 10f)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.1f).apply {
+                    setMargins(4, 0, 2, 0)
+                }
+
+                val passHeader = TextView(this@CruzeLauncherActivity).apply {
+                    text = "PASSENGER"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                }
+                addView(passHeader)
+
+                passengerTempText = TextView(this@CruzeLauncherActivity).apply {
+                    text = "22.5°C"
+                    setTextColor(Color.WHITE)
+                    textSize = 18f
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    setPadding(0, 2, 0, 4)
+                }
+                addView(passengerTempText)
+
+                // Temp Steppers
+                val steppers = LinearLayout(this@CruzeLauncherActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER
+
+                    val minusBtn = createMicroButton("−") {
+                        ClimateController.adjustPassengerTemp(this@CruzeLauncherActivity, -1.0f)
+                    }
+                    val plusBtn = createMicroButton("+") {
+                        ClimateController.adjustPassengerTemp(this@CruzeLauncherActivity, 1.0f)
+                    }
+                    addView(minusBtn, LinearLayout.LayoutParams(dpToPx(38), dpToPx(32)).apply { setMargins(0, 0, 4, 0) })
+                    addView(plusBtn, LinearLayout.LayoutParams(dpToPx(38), dpToPx(32)))
+                }
+                addView(steppers)
+
+                // 3-Stage Heated Seat Button
+                passengerSeatHeaterBtn = Button(this@CruzeLauncherActivity).apply {
+                    text = "💺 SEAT 0"
+                    setTextColor(Color.parseColor("#94A3B8"))
+                    textSize = 10f
+                    typeface = Typeface.DEFAULT_BOLD
+                    background = createButtonDrawable("#1A202C", "#2D3748", 6f)
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dpToPx(32)
+                    ).apply { setMargins(0, 6, 0, 0) }
+                    setOnClickListener {
+                        ClimateController.cyclePassengerSeatHeater(this@CruzeLauncherActivity)
+                    }
+                }
+                addView(passengerSeatHeaterBtn)
+            }
+            addView(passPod)
+
+            // 5. QUICK APP LAUNCHER POD (Apps Drawer & Setup)
+            val quickPod = LinearLayout(this@CruzeLauncherActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(6, 6, 6, 6)
+                background = createCardDrawable("#121620", "#1E293B", 10f)
+                layoutParams = LinearLayout.LayoutParams(dpToPx(72), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    setMargins(6, 0, 0, 0)
+                }
+
+                val appsBtn = createMicroButton("⊞ APPS") {
+                    showAppDrawer()
+                }
+                addView(appsBtn)
+
+                val carplayBtn = createMicroButton("⚡ PROJ") {
+                    ProjectionBridge.launchProjection(this@CruzeLauncherActivity)
+                }
+                addView(carplayBtn, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dpToPx(32)).apply { setMargins(0, 4, 0, 4) })
+
+                val carSetupBtn = createMicroButton("⚙ SETUP") {
+                    CanBusService.openNativeCarSettings(this@CruzeLauncherActivity)
+                }
+                addView(carSetupBtn)
+            }
+            addView(quickPod)
+        }
+        consoleLayout.addView(comfortRow)
+
+        return consoleLayout
+    }
+
+    private fun renderFanSpeedSegments(container: LinearLayout, currentLevel: Int) {
+        container.removeAllViews()
+        for (i in 1..8) {
+            val segment = View(this).apply {
+                val isActive = i <= currentLevel
+                setBackgroundColor(if (isActive) Color.parseColor("#00E5FF") else Color.parseColor("#1E293B"))
+                val params = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                    setMargins(2, 0, 2, 0)
+                }
+                layoutParams = params
+                setOnClickListener {
+                    ClimateController.setFanSpeed(this@CruzeLauncherActivity, i)
+                }
+            }
+            container.addView(segment)
         }
     }
 
-    private fun createDockItem(icon: String, label: String, onClick: () -> Unit): LinearLayout {
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+    private fun createHvacModeBtn(label: String, active: Boolean, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            textSize = 10f
+            typeface = Typeface.DEFAULT_BOLD
+            updateModeButtonState(this, active)
+            setOnClickListener {
+                it.animate().scaleX(0.92f).scaleY(0.92f).setDuration(60).withEndAction {
+                    it.animate().scaleX(1.0f).scaleY(1.0f).setDuration(60).start()
+                }.start()
+                onClick()
+            }
+        }
+    }
+
+    private fun updateModeButtonState(btn: Button, active: Boolean) {
+        if (active) {
+            btn.setTextColor(Color.parseColor("#00E5FF"))
+            btn.background = createButtonDrawable("#152535", "#00E5FF", 8f)
+        } else {
+            btn.setTextColor(Color.parseColor("#94A3B8"))
+            btn.background = createButtonDrawable("#121620", "#1E293B", 8f)
+        }
+    }
+
+    private fun createMicroButton(label: String, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            text = label
+            setTextColor(Color.WHITE)
+            textSize = 9f
+            typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-            setPadding(12, 6, 12, 6)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-
-            val iconView = TextView(this@CruzeLauncherActivity).apply {
-                text = icon
-                textSize = 19f
-                setTextColor(Color.WHITE)
-                gravity = Gravity.CENTER
+            background = createButtonDrawable("#1A202C", "#334155", 6f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dpToPx(30)
+            )
+            setOnClickListener {
+                it.animate().scaleX(0.9f).scaleY(0.9f).setDuration(60).withEndAction {
+                    it.animate().scaleX(1.0f).scaleY(1.0f).setDuration(60).start()
+                }.start()
+                onClick()
             }
-            addView(iconView)
-
-            val labelView = TextView(this@CruzeLauncherActivity).apply {
-                text = label
-                textSize = 10f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor("#8E9AA8"))
-                gravity = Gravity.CENTER
-                setPadding(0, 2, 0, 0)
-            }
-            addView(labelView)
-
-            setOnClickListener { onClick() }
         }
     }
 
@@ -843,135 +1121,161 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
     // CAN STATE & CLIMATE EVENT CALLBACKS
     // ==========================================
     override fun onVehicleStateUpdated(state: GmDeltaProtocol.VehicleState) {
-        speedGaugeText.text = "${state.speedMph} MPH"
+        speedGaugeText.text = if (state.useMetricUnits) "${(state.speedMph * 1.60934f).toInt()} KM/H" else "${state.speedMph} MPH"
         rpmGaugeText.text = "${state.engineRpm} RPM"
         fuelPercentText.text = "${state.fuelPercent}%"
         fuelProgressBar.progress = state.fuelPercent
-        outsideTempText.text = "${state.exteriorTempF}°F"
+        outsideTempText.text = if (state.useMetricUnits) "${((state.exteriorTempF - 32) * 5 / 9)}°C" else "${state.exteriorTempF}°F"
         batteryVoltageText.text = String.format(Locale.US, "%.1fV", state.batteryVolts)
+
+        centralLockBadge.text = if (state.doorsLocked) "⚡ CRUZE LTZ  🔒" else "⚡ CRUZE LTZ  🔓"
+        centralLockBadge.setTextColor(if (state.doorsLocked) Color.parseColor("#00E5FF") else Color.parseColor("#F59E0B"))
 
         cruzeViewport.setSpeed(state.speedMph)
         cruzeViewport.setSteeringAngle(state.steeringAngleDeg)
-        cruzeViewport.setLights(state.headlightsOn, brakeOn = false, leftSignal = false, rightSignal = false)
+        cruzeViewport.setLights(state.headlightsOn, brakeOn = false, leftSignal = state.turnSignalLeft, rightSignal = state.turnSignalRight)
         cruzeViewport.setDoor("FL", state.doorFL)
         cruzeViewport.setDoor("FR", state.doorFR)
         cruzeViewport.setDoor("RL", state.doorRL)
         cruzeViewport.setDoor("RR", state.doorRR)
         cruzeViewport.setDoor("trunk", state.trunkOpen)
+
+        // TPMS
+        val unit = if (state.useMetricUnits) "kPa" else "PSI"
+        val factor = if (state.useMetricUnits) 6.89476f else 1.0f
+        tpmsFLText.text = "FL: ${(state.tpmsFL * factor).toInt()} $unit"
+        tpmsFRText.text = "FR: ${(state.tpmsFR * factor).toInt()} $unit"
+        tpmsRLText.text = "RL: ${(state.tpmsRL * factor).toInt()} $unit"
+        tpmsRRText.text = "RR: ${(state.tpmsRR * factor).toInt()} $unit"
     }
 
     override fun onClimateStateUpdated(climate: GmDeltaProtocol.ClimateState) {
-        driverTempLabel.text = "DRIVER\n${climate.driverTempF.toInt()}°"
-        passengerTempLabel.text = "PASS\n${climate.passengerTempF.toInt()}°"
-        fanSpeedLabel.text = "FAN\n${climate.fanSpeed}"
-        acToggleBtn.text = if (climate.acEnabled) "A/C ON" else "A/C OFF"
-        acToggleBtn.setTextColor(if (climate.acEnabled) Color.parseColor("#00E5FF") else Color.parseColor("#8E9AA8"))
-        driverSeatBtn.text = "D-SEAT ${climate.driverSeatHeater}"
-        driverSeatBtn.setTextColor(if (climate.driverSeatHeater > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
-        passSeatBtn.text = "P-SEAT ${climate.passengerSeatHeater}"
-        passSeatBtn.setTextColor(if (climate.passengerSeatHeater > 0) Color.parseColor("#FF9100") else Color.parseColor("#8E9AA8"))
+        val isMetric = CanBusService.vehicleState.useMetricUnits
+        driverTempText.text = climate.formatDriverTemp(isMetric)
+        passengerTempText.text = climate.formatPassengerTemp(isMetric)
+
+        // Volume
+        volumeLevelText.text = "${climate.volumeLevel}"
+        volumeLevelText.setTextColor(if (climate.isMuted) Color.parseColor("#EF4444") else Color.parseColor("#00E5FF"))
+
+        // Heated Seats
+        updateSeatHeaterBtn(driverSeatHeaterBtn, "💺 DRIVER", climate.driverSeatHeater)
+        updateSeatHeaterBtn(passengerSeatHeaterBtn, "💺 PASS", climate.passengerSeatHeater)
+
+        // Fan Speed
+        fanSpeedLevelLabel.text = if (climate.fanSpeed == 0) "FAN OFF" else "FAN SPEED ${climate.fanSpeed}"
+        renderFanSpeedSegments(fanSpeedBarsContainer, climate.fanSpeed)
+
+        // Mode buttons
+        updateModeButtonState(hvacPowerBtn, !climate.powerOn)
+        hvacPowerBtn.text = if (climate.powerOn) "PWR ON" else "OFF"
+        updateModeButtonState(dualSyncBtn, climate.dualZoneSync)
+        updateModeButtonState(acCompressorBtn, climate.acEnabled)
+        updateModeButtonState(maxAcBtn, climate.maxAcEnabled)
+        updateModeButtonState(recircBtn, climate.recirculation)
+        updateModeButtonState(autoClimateBtn, climate.autoMode)
+        ventModeBtn.text = climate.airDistribution.label
+        updateModeButtonState(ventModeBtn, true)
+        updateModeButtonState(frontDefrostBtn, climate.frontDefrost)
+    }
+
+    private fun updateSeatHeaterBtn(btn: Button, prefix: String, level: Int) {
+        btn.text = "$prefix $level"
+        when (level) {
+            3 -> {
+                btn.setTextColor(Color.parseColor("#EF4444")) // High = Red
+                btn.background = createButtonDrawable("#2A1215", "#EF4444", 6f)
+            }
+            2 -> {
+                btn.setTextColor(Color.parseColor("#F59E0B")) // Med = Amber
+                btn.background = createButtonDrawable("#251D12", "#F59E0B", 6f)
+            }
+            1 -> {
+                btn.setTextColor(Color.parseColor("#00E5FF")) // Low = Cyan
+                btn.background = createButtonDrawable("#152535", "#00E5FF", 6f)
+            }
+            else -> {
+                btn.setTextColor(Color.parseColor("#64748B"))
+                btn.background = createButtonDrawable("#1A202C", "#2D3748", 6f)
+            }
+        }
     }
 
     // ==========================================
-    // UTILITY BUILDERS & HELPERS
+    // UI FACTORY HELPERS (Obsidian Automotive Aesthetics)
     // ==========================================
     private fun createCardLayout(): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(16, 14, 16, 14)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#0C1017"))
-                cornerRadius = 18f
-                setStroke(1, Color.parseColor("#1C2433"))
-            }
+            setBackgroundColor(Color.parseColor("#0D1017"))
+            background = createCardDrawable("#0D1017", "#1E293B", 12f)
+            setPadding(14, 12, 14, 12)
         }
     }
 
     private fun createCardHeader(title: String, accentHex: String): TextView {
         return TextView(this).apply {
             text = title
-            textSize = 10.5f
-            typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.parseColor(accentHex))
-            letterSpacing = 0.1f
-            setPadding(0, 0, 0, 6)
-        }
-    }
-
-    private fun checkOverlayPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName")
-            )
-            try {
-                startActivity(intent)
-            } catch (ignored: Exception) {}
-        }
-    }
-
-    // ==========================================
-    // FULLSCREEN APP DRAWER
-    // ==========================================
-    private fun showAppDrawerSheet() {
-        val dialog = AlertDialog.Builder(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).create()
-        val drawerLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#0A0C12"))
-            setPadding(24, 28, 24, 24)
-        }
-
-        // Header
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, 0, 0, 16)
-        }
-        val title = TextView(this).apply {
-            text = "ALL APPLICATIONS"
-            textSize = 18f
+            textSize = 10f
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            letterSpacing = 0.08f
+            setPadding(0, 0, 0, 4)
         }
-        header.addView(title)
+    }
 
-        val closeBtn = Button(this).apply {
-            text = "✕"
-            textSize = 18f
-            setTextColor(Color.parseColor("#8E9AA8"))
-            setBackgroundColor(Color.TRANSPARENT)
-            setOnClickListener { dialog.dismiss() }
-        }
-        header.addView(closeBtn)
-        drawerLayout.addView(header)
-
-        // Search Bar
-        val searchBox = EditText(this).apply {
-            hint = "Search apps..."
-            setHintTextColor(Color.parseColor("#5F6B7A"))
+    private fun createTactileButton(text: String, onClick: () -> Unit): Button {
+        return Button(this).apply {
+            this.text = text
             setTextColor(Color.WHITE)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#141923"))
-                cornerRadius = 14f
-                setStroke(1, Color.parseColor("#263248"))
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            background = createButtonDrawable("#1A202C", "#334155", 8f)
+            setOnClickListener {
+                it.animate().scaleX(0.93f).scaleY(0.93f).setDuration(60).withEndAction {
+                    it.animate().scaleX(1.0f).scaleY(1.0f).setDuration(60).start()
+                }.start()
+                onClick()
             }
-            setPadding(18, 14, 18, 14)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(0, 0, 0, 20) }
         }
-        drawerLayout.addView(searchBox)
+    }
 
-        // Apps Grid in ScrollView
-        val scroll = ScrollView(this).apply {
+    private fun showAppDrawer() {
+        val apps = AppDrawerManager.loadInstalledApps(this)
+
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.parseColor("#08090E"))
+            setPadding(24, 20, 24, 24)
+        }
+
+        val titleView = TextView(this).apply {
+            text = "INSTALLED APPLICATIONS"
+            setTextColor(Color.parseColor("#00E5FF"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            letterSpacing = 0.08f
+            setPadding(0, 0, 0, 12)
+        }
+        dialogView.addView(titleView)
+
+        val searchBox = EditText(this).apply {
+            hint = "Search all apps..."
+            setHintTextColor(Color.parseColor("#64748B"))
+            setTextColor(Color.WHITE)
+            textSize = 14f
+            background = createCardDrawable("#151D2A", "#334155", 10f)
+            setPadding(16, 12, 16, 12)
+        }
+        dialogView.addView(searchBox)
+
+        val gridScrollView = ScrollView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                1f
-            )
+                dpToPx(420)
+            ).apply { setMargins(0, 14, 0, 0) }
         }
+
         val gridLayout = GridLayout(this).apply {
             columnCount = 4
             layoutParams = ViewGroup.LayoutParams(
@@ -979,141 +1283,99 @@ class CruzeLauncherActivity : Activity(), CanBusService.VehicleStateListener {
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
-        scroll.addView(gridLayout)
-        drawerLayout.addView(scroll)
+        gridScrollView.addView(gridLayout)
+        dialogView.addView(gridScrollView)
 
-        fun populateApps(apps: List<AppInfo>) {
+        var dialog: AlertDialog? = null
+
+        fun populateGrid(query: String) {
             gridLayout.removeAllViews()
-            val screenWidth = resources.displayMetrics.widthPixels - 48
-            val colWidth = screenWidth / 4
+            val filtered = if (query.isEmpty()) apps else apps.filter { it.label.contains(query, ignoreCase = true) }
+            val screenWidth = resources.displayMetrics.widthPixels - dpToPx(64)
+            val itemWidth = (screenWidth / 4).coerceAtLeast(dpToPx(70))
 
-            for (app in apps) {
-                val item = LinearLayout(this).apply {
+            for (app in filtered) {
+                val itemView = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     gravity = Gravity.CENTER
-                    setPadding(8, 14, 8, 14)
+                    setPadding(8, 12, 8, 12)
                     layoutParams = GridLayout.LayoutParams().apply {
-                        width = colWidth
+                        width = itemWidth
+                        height = ViewGroup.LayoutParams.WRAP_CONTENT
                     }
-
-                    val icon = ImageView(this@CruzeLauncherActivity).apply {
+                    val iconView = ImageView(this@CruzeLauncherActivity).apply {
                         setImageDrawable(app.icon)
-                        layoutParams = LinearLayout.LayoutParams(62, 62)
+                        layoutParams = LinearLayout.LayoutParams(dpToPx(48), dpToPx(48))
                     }
-                    addView(icon)
-
-                    val name = TextView(this@CruzeLauncherActivity).apply {
+                    val labelView = TextView(this@CruzeLauncherActivity).apply {
                         text = app.label
-                        textSize = 11.5f
-                        typeface = Typeface.DEFAULT_BOLD
                         setTextColor(Color.WHITE)
-                        gravity = Gravity.CENTER
+                        textSize = 10f
                         maxLines = 1
+                        gravity = Gravity.CENTER
                         setPadding(0, 6, 0, 0)
                     }
-                    addView(name)
-
+                    addView(iconView)
+                    addView(labelView)
                     setOnClickListener {
+                        dialog?.dismiss()
                         AppDrawerManager.launchApp(this@CruzeLauncherActivity, app)
-                        dialog.dismiss()
                     }
                 }
-                gridLayout.addView(item)
+                gridLayout.addView(itemView)
             }
         }
 
-        populateApps(AppDrawerManager.getApps())
+        populateGrid("")
 
         searchBox.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable?) {
-                populateApps(AppDrawerManager.getApps(s?.toString() ?: ""))
-            }
+            override fun afterTextChanged(s: Editable?) { populateGrid(s?.toString() ?: "") }
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         })
 
-        dialog.setView(drawerLayout)
+        dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setView(dialogView)
+            .setPositiveButton("Close", null)
+            .create()
         dialog.show()
     }
 
-    // ==========================================
-    // CAN SIMULATOR DIALOG FOR TESTING
-    // ==========================================
-    private fun showCanSimDialog() {
-        val dialog = AlertDialog.Builder(this).create()
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(24, 20, 24, 20)
-            setBackgroundColor(Color.parseColor("#121722"))
+    private fun createCardDrawable(bgColorHex: String, strokeColorHex: String, cornerRadiusDp: Float): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(Color.parseColor(bgColorHex))
+            setStroke(dpToPx(1), Color.parseColor(strokeColorHex))
+            cornerRadius = dpToPx(cornerRadiusDp.toInt()).toFloat()
         }
-
-        val title = TextView(this).apply {
-            text = "CAN-Bus Hardware Simulator"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
-            setPadding(0, 0, 0, 16)
-        }
-        layout.addView(title)
-
-        fun createSimButton(label: String, action: () -> Unit) {
-            val btn = Button(this).apply {
-                text = label
-                setTextColor(Color.WHITE)
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1F2838"))
-                    cornerRadius = 10f
-                }
-                setOnClickListener { action() }
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(0, 0, 0, 8) }
-            }
-            layout.addView(btn)
-        }
-
-        createSimButton("Simulate Open Driver Door") {
-            val state = CanBusService.vehicleState
-            state.doorFL = !state.doorFL
-            CanBusService.notifyUpdate()
-        }
-
-        createSimButton("Simulate Open Trunk") {
-            val state = CanBusService.vehicleState
-            state.trunkOpen = !state.trunkOpen
-            CanBusService.notifyUpdate()
-        }
-
-        createSimButton("Simulate 45 MPH / 2200 RPM") {
-            val state = CanBusService.vehicleState
-            state.speedMph = if (state.speedMph == 0) 45 else 0
-            state.engineRpm = if (state.speedMph > 0) 2200 else 0
-            CanBusService.notifyUpdate()
-        }
-
-        createSimButton("Close") { dialog.dismiss() }
-
-        dialog.setView(layout)
-        dialog.show()
     }
 
-    // Steering wheel key interception
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        return when (keyCode) {
-            KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                MediaManager.skipNext(this)
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                MediaManager.skipPrevious(this)
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
-                MediaManager.togglePlayPause(this)
-                true
-            }
-            else -> super.onKeyDown(keyCode, event)
+    private fun createButtonDrawable(bgColorHex: String, strokeColorHex: String, cornerRadiusDp: Float): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(Color.parseColor(bgColorHex))
+            setStroke(dpToPx(1), Color.parseColor(strokeColorHex))
+            cornerRadius = dpToPx(cornerRadiusDp.toInt()).toFloat()
         }
+    }
+
+    private fun createGradientDrawable(startColorHex: String, endColorHex: String, cornerRadiusDp: Float): GradientDrawable {
+        return GradientDrawable(
+            GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(Color.parseColor(startColorHex), Color.parseColor(endColorHex))
+        ).apply {
+            cornerRadius = dpToPx(cornerRadiusDp.toInt()).toFloat()
+        }
+    }
+
+    private fun createPillDrawable(bgColorHex: String, strokeColorHex: String): GradientDrawable {
+        return GradientDrawable().apply {
+            setColor(Color.parseColor(bgColorHex))
+            setStroke(dpToPx(1), Color.parseColor(strokeColorHex))
+            cornerRadius = 9999f
+        }
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        val density = resources.displayMetrics.density
+        return (dp * density).toInt()
     }
 }

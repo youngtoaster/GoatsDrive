@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-  <title>CruzeOS 3D Vehicle Stage</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>2012 Chevrolet Cruze LTZ 3D Cockpit</title>
   <style>
     * {
       box-sizing: border-box;
@@ -11,157 +11,134 @@
       padding: 0;
       user-select: none;
       -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
-    html, body {
+
+    body, html {
       width: 100%;
       height: 100%;
       overflow: hidden;
-      background: radial-gradient(circle at 50% 40%, #151A22 0%, #0A0C10 75%, #050608 100%);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      background: radial-gradient(circle at 50% 40%, #10141D 0%, #07090D 100%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
+
     #canvas-container {
       width: 100%;
       height: 100%;
       position: absolute;
       top: 0;
       left: 0;
-      touch-action: none;
+      z-index: 1;
     }
-    /* Sleek Automotive HUD Overlay */
+
+    /* Minimal Automotive HUD Overlay */
     #hud-overlay {
       position: absolute;
-      top: 14px;
-      left: 14px;
-      right: 14px;
-      pointer-events: none;
+      top: 10px;
+      left: 12px;
+      right: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       z-index: 10;
+      pointer-events: none;
     }
+
     .hud-badge {
-      background: rgba(18, 22, 31, 0.85);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 20px;
-      padding: 6px 14px;
-      color: #94A3B8;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.8px;
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 8px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      gap: 6px;
+      background: rgba(13, 17, 23, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 9999px;
+      padding: 4px 12px;
+      color: #94A3B8;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     }
+
     .hud-badge .indicator-dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: #10B981;
-      box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
     }
+
     .hud-badge.warning {
-      border-color: rgba(245, 158, 11, 0.4);
       color: #F59E0B;
+      border-color: rgba(245, 158, 11, 0.3);
     }
     .hud-badge.warning .indicator-dot {
       background: #F59E0B;
-      box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+      box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);
     }
+
     .hud-badge.active {
-      border-color: rgba(0, 229, 255, 0.5);
       color: #00E5FF;
+      border-color: rgba(0, 229, 255, 0.3);
     }
     .hud-badge.active .indicator-dot {
       background: #00E5FF;
-      box-shadow: 0 0 10px rgba(0, 229, 255, 0.8);
+      box-shadow: 0 0 6px rgba(0, 229, 255, 0.6);
     }
 
-    /* Minimal, Instant Loading Transition */
-    #loading-cover {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background: #0A0C10;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      z-index: 100;
-      transition: opacity 0.4s ease-out;
-      pointer-events: none;
-    }
-    .loading-pulse {
-      width: 38px;
-      height: 38px;
-      border: 2px solid rgba(0, 229, 255, 0.15);
-      border-top-color: #00E5FF;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      margin-bottom: 12px;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    .loading-text {
-      color: #64748B;
-      font-size: 11.5px;
-      letter-spacing: 1.5px;
-      font-weight: 600;
-      text-transform: uppercase;
-    }
-
-    /* Tactile Bottom Controls Bar */
+    /* Floating View Controls & Paint Selector */
     #stage-controls {
       position: absolute;
-      bottom: 14px;
-      left: 14px;
-      right: 14px;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      z-index: 20;
-      pointer-events: none;
-    }
-    .cam-cluster {
-      display: flex;
-      gap: 6px;
+      z-index: 10;
       pointer-events: auto;
     }
-    .cam-btn {
-      background: rgba(18, 22, 31, 0.85);
-      backdrop-filter: blur(10px);
+
+    .cam-cluster {
+      display: flex;
+      background: rgba(13, 17, 23, 0.82);
       border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 16px;
-      padding: 6px 12px;
-      color: #94A3B8;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      outline: none;
-      transition: all 0.2s ease;
+      border-radius: 10px;
+      padding: 3px;
+      gap: 3px;
+      backdrop-filter: blur(8px);
     }
+
+    .cam-btn {
+      background: transparent;
+      border: none;
+      color: #94A3B8;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 6px 10px;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
     .cam-btn.active, .cam-btn:active {
-      background: #00E5FF;
-      color: #08090E;
-      border-color: #00E5FF;
-      box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
+      background: rgba(0, 229, 255, 0.15);
+      color: #00E5FF;
     }
 
     .color-swatches {
       display: flex;
       gap: 7px;
-      background: rgba(18, 22, 31, 0.85);
-      backdrop-filter: blur(10px);
+      background: rgba(13, 17, 23, 0.82);
       border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: 18px;
-      padding: 5px 10px;
-      pointer-events: auto;
+      border-radius: 9999px;
+      padding: 4px 8px;
+      backdrop-filter: blur(8px);
     }
+
     .swatch {
       width: 18px;
       height: 18px;
@@ -177,11 +154,6 @@
   </style>
 </head>
 <body>
-
-  <div id="loading-cover">
-    <div class="loading-pulse"></div>
-    <div class="loading-text" id="loading-msg">Cruze 3D Cockpit</div>
-  </div>
 
   <div id="hud-overlay">
     <div class="hud-badge" id="badge-doors">
@@ -213,469 +185,438 @@
 
   <div id="canvas-container"></div>
 
-  <script type="module">
-    import * as THREE from './lib/three.module.js';
-    import { OrbitControls } from './lib/OrbitControls.js';
-    import { FBXLoader } from './lib/FBXLoader.js';
+  <!-- Classic Zero-CORS Bundle (Universal Android WebView Compatible) -->
+  <script src="./lib/cruze3d.bundle.js"></script>
 
-    let scene, camera, renderer, controls;
-    let carGroup, bodyMesh, steeringWheel;
-    let wheels = [];
-    let headlights = [], taillights = [];
-    let ambientCabinLight;
+  <script>
+    (function() {
+      var THREE = window.THREE;
+      var OrbitControls = window.THREE.OrbitControls || window.OrbitControls;
+      var FBXLoader = window.THREE.FBXLoader || window.FBXLoader;
 
-    // Door Status Indicators & Halos
-    const doorStates = {
-      FL: { open: false, label: "DRIVER DOOR" },
-      FR: { open: false, label: "PASSENGER DOOR" },
-      RL: { open: false, label: "REAR LEFT DOOR" },
-      RR: { open: false, label: "REAR RIGHT DOOR" },
-      trunk: { open: false, label: "TRUNK" },
-      hood: { open: false, label: "HOOD" }
-    };
+      var scene, camera, renderer, controls;
+      var carGroup, bodyMesh, steeringWheel;
+      var wheels = [];
+      var headlights = [], taillights = [];
+      var ambientCabinLight;
 
-    let targetSteeringAngle = 0;
-    let currentSteeringAngle = 0;
-    let currentSpeedMph = 0;
+      var doorStates = {
+        FL: { open: false, label: "DRIVER DOOR" },
+        FR: { open: false, label: "PASSENGER DOOR" },
+        RL: { open: false, label: "REAR LEFT DOOR" },
+        RR: { open: false, label: "REAR RIGHT DOOR" },
+        trunk: { open: false, label: "TRUNK" },
+        hood: { open: false, label: "HOOD" }
+      };
 
-    // Materials
-    let paintMaterial = null;
+      var targetSteeringAngle = 0;
+      var currentSteeringAngle = 0;
+      var currentSpeedMph = 0;
+      var paintMaterial = null;
 
-    init();
+      init();
 
-    function init() {
-      const container = document.getElementById('canvas-container');
-      const width = container.clientWidth || window.innerWidth;
-      const height = container.clientHeight || window.innerHeight;
+      function init() {
+        var container = document.getElementById('canvas-container');
+        var width = container.clientWidth || window.innerWidth;
+        var height = container.clientHeight || window.innerHeight;
 
-      scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x0A0C10, 0.04);
+        scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0A0C10, 0.04);
 
-      camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
-      camera.position.set(-3.2, 1.8, 3.6);
+        camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 100);
+        camera.position.set(-3.2, 1.8, 3.6);
 
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
-      renderer.setSize(width, height);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.15;
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-      container.appendChild(renderer.domElement);
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+        renderer.setSize(width, height);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.15;
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
 
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.07;
-      controls.minDistance = 2.0;
-      controls.maxDistance = 8.5;
-      controls.maxPolarAngle = Math.PI / 2 + 0.03; // Ground limiter
-      controls.target.set(0, 0.65, 0);
+        controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.07;
+        controls.minDistance = 2.0;
+        controls.maxDistance = 8.5;
+        controls.maxPolarAngle = Math.PI / 2 + 0.03;
+        controls.target.set(0, 0.65, 0);
 
-      setupLighting();
-      setupGroundStage();
-      setupCarLighting();
-      setupRaycasting(renderer.domElement);
+        setupLighting();
+        setupGroundStage();
+        setupCarLighting();
+        setupRaycasting(renderer.domElement);
 
-      window.addEventListener('resize', onWindowResize, false);
+        window.addEventListener('resize', onWindowResize, false);
 
-      // Start animation loop immediately
-      animate();
+        // FRAME 0: Render procedural Cruze LTZ immediately so user sees the 3D car in <16ms!
+        createProceduralCruze();
 
-      // Load 3D model
-      loadCruzeModel();
+        // Start render loop
+        animate();
 
-      // Failsafe watchdog: remove loading screen after 1.5s max regardless of network/disk
-      setTimeout(() => {
-        dismissLoader();
-      }, 1500);
-    }
-
-    function dismissLoader() {
-      const cover = document.getElementById('loading-cover');
-      if (cover && cover.style.display !== 'none') {
-        cover.style.opacity = '0';
-        setTimeout(() => { cover.style.display = 'none'; }, 450);
+        // Load FBX asynchronously in background and swap smoothly
+        loadCruzeFbx();
       }
-    }
 
-    function setupLighting() {
-      // Key Studio Overhead Light
-      const keySun = new THREE.DirectionalLight(0xFFFFFF, 2.4);
-      keySun.position.set(4, 9, 5);
-      keySun.castShadow = true;
-      keySun.shadow.mapSize.width = 1024;
-      keySun.shadow.mapSize.height = 1024;
-      keySun.shadow.bias = -0.001;
-      scene.add(keySun);
+      function setupLighting() {
+        var keySun = new THREE.DirectionalLight(0xFFFFFF, 2.4);
+        keySun.position.set(4, 9, 5);
+        keySun.castShadow = true;
+        keySun.shadow.mapSize.width = 1024;
+        keySun.shadow.mapSize.height = 1024;
+        scene.add(keySun);
 
-      // Cool Ice-Blue Rim Fill (Cruze signature styling)
-      const rimLight = new THREE.DirectionalLight(0x80D8FF, 1.5);
-      rimLight.position.set(-5, 4, -4);
-      scene.add(rimLight);
+        var rimLight = new THREE.DirectionalLight(0x80D8FF, 1.5);
+        rimLight.position.set(-5, 4, -4);
+        scene.add(rimLight);
 
-      // Warm ground bounce
-      const groundBounce = new THREE.DirectionalLight(0xE2E8F0, 0.5);
-      groundBounce.position.set(0, -3, 0);
-      scene.add(groundBounce);
+        var hemi = new THREE.HemisphereLight(0xCBD5E1, 0x0F172A, 1.1);
+        scene.add(hemi);
 
-      // Ambient Fill
-      const hemi = new THREE.HemisphereLight(0xCBD5E1, 0x0F172A, 1.1);
-      scene.add(hemi);
+        ambientCabinLight = new THREE.PointLight(0x00E5FF, 1.2, 2.0);
+        ambientCabinLight.position.set(0, 0.75, 0.2);
+        scene.add(ambientCabinLight);
+      }
 
-      // Cabin Glow
-      ambientCabinLight = new THREE.PointLight(0x00E5FF, 1.2, 2.0);
-      ambientCabinLight.position.set(0, 0.75, 0.2);
-      scene.add(ambientCabinLight);
-    }
+      function setupGroundStage() {
+        var podiumGeom = new THREE.CylinderGeometry(3.6, 3.8, 0.08, 64);
+        var podiumMat = new THREE.MeshStandardMaterial({
+          color: 0x11151D,
+          metalness: 0.85,
+          roughness: 0.35
+        });
+        var podium = new THREE.Mesh(podiumGeom, podiumMat);
+        podium.position.y = -0.04;
+        podium.receiveShadow = true;
+        scene.add(podium);
 
-    function setupGroundStage() {
-      // Sleek dark circular showroom podium
-      const podiumGeom = new THREE.CylinderGeometry(3.6, 3.8, 0.08, 64);
-      const podiumMat = new THREE.MeshStandardMaterial({
-        color: 0x11151D,
-        metalness: 0.85,
-        roughness: 0.35
-      });
-      const podium = new THREE.Mesh(podiumGeom, podiumMat);
-      podium.position.y = -0.04;
-      podium.receiveShadow = true;
-      scene.add(podium);
+        var floorGeom = new THREE.PlaneGeometry(16, 16);
+        var floorMat = new THREE.MeshStandardMaterial({
+          color: 0x07090D,
+          roughness: 0.7,
+          metalness: 0.2
+        });
+        var floor = new THREE.Mesh(floorGeom, floorMat);
+        floor.rotation.x = -Math.PI / 2;
+        floor.position.y = -0.08;
+        floor.receiveShadow = true;
+        scene.add(floor);
+      }
 
-      // Outer stage floor
-      const floorGeom = new THREE.PlaneGeometry(16, 16);
-      const floorMat = new THREE.MeshStandardMaterial({
-        color: 0x07090D,
-        roughness: 0.7,
-        metalness: 0.2
-      });
-      const floor = new THREE.Mesh(floorGeom, floorMat);
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.y = -0.08;
-      floor.receiveShadow = true;
-      scene.add(floor);
-    }
+      function setupCarLighting() {
+        var headL = new THREE.SpotLight(0xE0F7FA, 3.5, 12, Math.PI / 5, 0.3);
+        headL.position.set(-0.62, 1.85, 0.65);
+        headL.target.position.set(-0.62, 6.0, 0.2);
+        scene.add(headL);
+        scene.add(headL.target);
+        headlights.push(headL);
 
-    function setupCarLighting() {
-      // Front Dual Projectors
-      const headL = new THREE.SpotLight(0xE0F7FA, 3.5, 12, Math.PI / 5, 0.3);
-      headL.position.set(-0.62, 1.85, 0.65);
-      headL.target.position.set(-0.62, 6.0, 0.2);
-      scene.add(headL);
-      scene.add(headL.target);
-      headlights.push(headL);
+        var headR = new THREE.SpotLight(0xE0F7FA, 3.5, 12, Math.PI / 5, 0.3);
+        headR.position.set(0.62, 1.85, 0.65);
+        headR.target.position.set(0.62, 6.0, 0.2);
+        scene.add(headR);
+        scene.add(headR.target);
+        headlights.push(headR);
 
-      const headR = new THREE.SpotLight(0xE0F7FA, 3.5, 12, Math.PI / 5, 0.3);
-      headR.position.set(0.62, 1.85, 0.65);
-      headR.target.position.set(0.62, 6.0, 0.2);
-      scene.add(headR);
-      scene.add(headR.target);
-      headlights.push(headR);
+        var tailL = new THREE.PointLight(0xFF1744, 1.6, 2.5);
+        tailL.position.set(-0.71, -1.82, 0.71);
+        scene.add(tailL);
+        taillights.push(tailL);
 
-      // Rear Red Taillight Glow
-      const tailL = new THREE.PointLight(0xFF1744, 1.6, 2.5);
-      tailL.position.set(-0.71, -1.82, 0.71);
-      scene.add(tailL);
-      taillights.push(tailL);
+        var tailR = new THREE.PointLight(0xFF1744, 1.6, 2.5);
+        tailR.position.set(0.71, -1.82, 0.71);
+        scene.add(tailR);
+        taillights.push(tailR);
+      }
 
-      const tailR = new THREE.PointLight(0xFF1744, 1.6, 2.5);
-      tailR.position.set(0.71, -1.82, 0.71);
-      scene.add(tailR);
-      taillights.push(tailR);
-    }
-
-    function loadCruzeModel() {
-      const loader = new FBXLoader();
-      loader.load('./cruze.fbx', (fbx) => {
+      function createProceduralCruze() {
+        if (carGroup) return;
         carGroup = new THREE.Group();
         carGroup.name = "ChevyCruze";
 
-        processCarModel(fbx);
-        scene.add(carGroup);
+        paintMaterial = new THREE.MeshStandardMaterial({
+          color: 0xF0F3F6,
+          metalness: 0.88,
+          roughness: 0.18
+        });
 
-        dismissLoader();
+        // Cruze Sedan Lower Chassis & Body
+        var bodyGeom = new THREE.BoxGeometry(1.68, 0.65, 3.7);
+        bodyMesh = new THREE.Mesh(bodyGeom, paintMaterial);
+        bodyMesh.position.y = 0.52;
+        bodyMesh.castShadow = true;
+        carGroup.add(bodyMesh);
+
+        // Cruze Aerodynamic Hood & Front Grille
+        var hoodGeom = new THREE.BoxGeometry(1.64, 0.25, 1.1);
+        var hoodMesh = new THREE.Mesh(hoodGeom, paintMaterial);
+        hoodMesh.position.set(0, 0.72, 1.25);
+        hoodMesh.rotation.x = 0.08;
+        carGroup.add(hoodMesh);
+
+        // Cruze Greenhouse / Cabin Glass
+        var cabinGeom = new THREE.BoxGeometry(1.42, 0.56, 1.95);
+        var glassMat = new THREE.MeshStandardMaterial({
+          color: 0x1A202C,
+          metalness: 0.25,
+          roughness: 0.08,
+          transparent: true,
+          opacity: 0.55
+        });
+        var cabin = new THREE.Mesh(cabinGeom, glassMat);
+        cabin.position.set(0, 1.05, -0.12);
+        carGroup.add(cabin);
+
+        // Cruze Roof Panel
+        var roofGeom = new THREE.BoxGeometry(1.36, 0.06, 1.6);
+        var roof = new THREE.Mesh(roofGeom, paintMaterial);
+        roof.position.set(0, 1.34, -0.15);
+        carGroup.add(roof);
+
+        // 4 LTZ Alloy Wheels
+        var tireGeom = new THREE.CylinderGeometry(0.33, 0.33, 0.22, 32);
+        var tireMat = new THREE.MeshStandardMaterial({ color: 0x1C1C1E, roughness: 0.8 });
+        var rimMat = new THREE.MeshStandardMaterial({ color: 0xD1D5DB, metalness: 0.9, roughness: 0.15 });
+
+        var positions = [
+          [-0.82, 0.33,  1.15],
+          [ 0.82, 0.33,  1.15],
+          [-0.82, 0.33, -1.15],
+          [ 0.82, 0.33, -1.15]
+        ];
+
+        wheels = [];
+        positions.forEach(function(pos, idx) {
+          var wheelGroup = new THREE.Group();
+          var tire = new THREE.Mesh(tireGeom, tireMat);
+          tire.rotation.z = Math.PI / 2;
+          wheelGroup.add(tire);
+
+          var hub = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.23, 16), rimMat);
+          hub.rotation.z = Math.PI / 2;
+          wheelGroup.add(hub);
+
+          wheelGroup.position.set(pos[0], pos[1], pos[2]);
+          wheelGroup.name = "Wheel_" + idx;
+          wheels.push(wheelGroup);
+          carGroup.add(wheelGroup);
+        });
+
+        scene.add(carGroup);
 
         if (window.AndroidCar && window.AndroidCar.onModelLoaded) {
           window.AndroidCar.onModelLoaded();
         }
-      }, null, (err) => {
-        console.warn("FBX load notice (rendering procedural vehicle fallback):", err);
-        createProceduralCruze();
-        dismissLoader();
-      });
-    }
-
-    function processCarModel(fbx) {
-      bodyMesh = fbx.children.find(c => c.name === 'Body');
-      const steeringWheelMesh = fbx.children.find(c => c.name === 'SteeringWheel');
-      const w1 = fbx.children.find(c => c.name === 'Wheel1');
-      const w2 = fbx.children.find(c => c.name === 'Wheel2');
-      const w3 = fbx.children.find(c => c.name === 'Wheel3');
-      const w4 = fbx.children.find(c => c.name === 'Wheel4');
-
-      // Metallic Clearcoat Paint Material (Summit White default)
-      paintMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0xF0F3F6),
-        metalness: 0.88,
-        roughness: 0.18,
-        envMapIntensity: 1.5
-      });
-
-      // Glass Material
-      const glassMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x15202B),
-        metalness: 0.15,
-        roughness: 0.05,
-        transparent: true,
-        opacity: 0.45
-      });
-
-      // Chrome Accent Material
-      const chromeMaterial = new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0xFFFFFF),
-        metalness: 0.96,
-        roughness: 0.08
-      });
-
-      // Apply tailored materials
-      if (bodyMesh) {
-        if (Array.isArray(bodyMesh.material)) {
-          bodyMesh.material.forEach((mat, i) => {
-            const name = (mat.name || '').toLowerCase();
-            if (name.includes('window') || name.includes('glass')) {
-              bodyMesh.material[i] = glassMaterial;
-            } else if (name.includes('chrome') || name.includes('trim')) {
-              bodyMesh.material[i] = chromeMaterial;
-            } else {
-              bodyMesh.material[i] = paintMaterial;
-            }
-          });
-        } else {
-          bodyMesh.material = paintMaterial;
-        }
-
-        bodyMesh.castShadow = true;
-        bodyMesh.receiveShadow = true;
-        carGroup.add(bodyMesh);
       }
 
-      if (steeringWheelMesh) {
-        steeringWheel = steeringWheelMesh.clone();
-        carGroup.add(steeringWheel);
-      }
+      function loadCruzeFbx() {
+        if (!FBXLoader) return;
+        var loader = new FBXLoader();
+        loader.load('./cruze.fbx', function(fbx) {
+          if (!fbx || !fbx.children) return;
 
-      [w1, w2, w3, w4].forEach((w, idx) => {
-        if (!w) return;
-        const wheelObj = w.clone();
-        wheelObj.name = `Wheel_${idx}`;
-        wheels.push(wheelObj);
-        carGroup.add(wheelObj);
-      });
-    }
+          var fbxBody = fbx.children.find(function(c) { return c.name === 'Body'; });
+          var fbxSteering = fbx.children.find(function(c) { return c.name === 'SteeringWheel'; });
+          var w1 = fbx.children.find(function(c) { return c.name === 'Wheel1'; });
+          var w2 = fbx.children.find(function(c) { return c.name === 'Wheel2'; });
+          var w3 = fbx.children.find(function(c) { return c.name === 'Wheel3'; });
+          var w4 = fbx.children.find(function(c) { return c.name === 'Wheel4'; });
 
-    function createProceduralCruze() {
-      if (carGroup) return;
-      carGroup = new THREE.Group();
-      paintMaterial = new THREE.MeshStandardMaterial({
-        color: 0xF0F3F6,
-        metalness: 0.88,
-        roughness: 0.18
-      });
-
-      // Aerodynamic Cruze Sedan Body
-      const bodyGeom = new THREE.BoxGeometry(1.68, 0.72, 3.8);
-      bodyMesh = new THREE.Mesh(bodyGeom, paintMaterial);
-      bodyMesh.position.y = 0.55;
-      bodyMesh.castShadow = true;
-      carGroup.add(bodyMesh);
-
-      // Cabin / Greenhouse
-      const cabinGeom = new THREE.BoxGeometry(1.42, 0.58, 2.0);
-      const glassMat = new THREE.MeshStandardMaterial({ color: 0x1A202C, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.5 });
-      const cabin = new THREE.Mesh(cabinGeom, glassMat);
-      cabin.position.set(0, 1.05, -0.15);
-      carGroup.add(cabin);
-
-      // 4 Wheels
-      const tireGeom = new THREE.CylinderGeometry(0.33, 0.33, 0.22, 32);
-      const tireMat = new THREE.MeshStandardMaterial({ color: 0x1C1C1E, roughness: 0.8 });
-      const positions = [
-        [-0.82, 0.33,  1.15],
-        [ 0.82, 0.33,  1.15],
-        [-0.82, 0.33, -1.15],
-        [ 0.82, 0.33, -1.15]
-      ];
-      positions.forEach((pos, idx) => {
-        const wheel = new THREE.Mesh(tireGeom, tireMat);
-        wheel.rotation.z = Math.PI / 2;
-        wheel.position.set(...pos);
-        wheels.push(wheel);
-        carGroup.add(wheel);
-      });
-
-      scene.add(carGroup);
-    }
-
-    function setupRaycasting(domElement) {
-      const raycaster = new THREE.Raycaster();
-      const mouse = new THREE.Vector2();
-
-      domElement.addEventListener('pointerup', (e) => {
-        if (controls.state !== -1) return; // Ignore drag moves
-
-        const rect = domElement.getBoundingClientRect();
-        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-        raycaster.setFromCamera(mouse, camera);
-        const intersects = raycaster.intersectObjects(carGroup ? carGroup.children : [], true);
-
-        if (intersects.length > 0) {
-          // Identify touched quadrant
-          const hitPoint = intersects[0].point;
-          if (hitPoint.z > 0.3) {
-            if (hitPoint.x < 0) toggleDoor('FL');
-            else toggleDoor('FR');
-          } else if (hitPoint.z < -0.8) {
-            toggleDoor('trunk');
-          } else {
-            if (hitPoint.x < 0) toggleDoor('RL');
-            else toggleDoor('RR');
+          if (fbxBody) {
+            // Replace procedural body with detailed FBX body
+            if (bodyMesh) carGroup.remove(bodyMesh);
+            fbxBody.material = paintMaterial;
+            fbxBody.castShadow = true;
+            fbxBody.receiveShadow = true;
+            bodyMesh = fbxBody;
+            carGroup.add(bodyMesh);
           }
-        }
-      });
-    }
 
-    function toggleDoor(key) {
-      const state = doorStates[key];
-      if (!state) return;
-      state.open = !state.open;
-      updateDoorsBadge();
+          if (fbxSteering) {
+            steeringWheel = fbxSteering.clone();
+            carGroup.add(steeringWheel);
+          }
 
-      if (window.AndroidCar && window.AndroidCar.onPartTapped) {
-        window.AndroidCar.onPartTapped(key, state.open);
+          var fbxWheels = [w1, w2, w3, w4];
+          if (fbxWheels[0] && fbxWheels[1]) {
+            wheels.forEach(function(w) { carGroup.remove(w); });
+            wheels = [];
+            fbxWheels.forEach(function(w, idx) {
+              if (!w) return;
+              var wheelObj = w.clone();
+              wheelObj.name = "Wheel_" + idx;
+              wheels.push(wheelObj);
+              carGroup.add(wheelObj);
+            });
+          }
+        }, null, function(err) {
+          console.warn("FBX load notice (retained procedural vehicle):", err);
+        });
       }
-    }
 
-    // --- Bidirectional Bridge for Android Kotlin ---
-    window.CruzeBridge = {
-      setDoorState: (door, isOpen) => {
-        if (!doorStates[door]) return;
-        doorStates[door].open = isOpen;
+      function setupRaycasting(domElement) {
+        var raycaster = new THREE.Raycaster();
+        var mouse = new THREE.Vector2();
+
+        domElement.addEventListener('pointerup', function(e) {
+          if (controls.state !== -1) return;
+          var rect = domElement.getBoundingClientRect();
+          mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+          raycaster.setFromCamera(mouse, camera);
+          var intersects = raycaster.intersectObjects(carGroup ? carGroup.children : [], true);
+
+          if (intersects.length > 0) {
+            var hitPoint = intersects[0].point;
+            if (hitPoint.z > 0.3) {
+              if (hitPoint.x < 0) toggleDoor('FL');
+              else toggleDoor('FR');
+            } else if (hitPoint.z < -0.8) {
+              toggleDoor('trunk');
+            } else {
+              if (hitPoint.x < 0) toggleDoor('RL');
+              else toggleDoor('RR');
+            }
+          }
+        });
+      }
+
+      function toggleDoor(key) {
+        var state = doorStates[key];
+        if (!state) return;
+        state.open = !state.open;
         updateDoorsBadge();
-      },
 
-      setLightsState: (headlightsOn, brakeOn, leftTurn, rightTurn) => {
-        headlights.forEach(l => l.intensity = headlightsOn ? 4.0 : 0);
-        taillights.forEach(l => l.intensity = brakeOn ? 4.8 : (headlightsOn ? 1.4 : 0));
-        const badge = document.getElementById('badge-lights');
-        badge.classList.toggle('active', headlightsOn);
-        document.getElementById('label-lights').innerText = headlightsOn ? "LIGHTS ON" : "LIGHTS AUTO";
-      },
-
-      setExteriorColor: (hexColor) => {
-        if (paintMaterial) {
-          paintMaterial.color.set(hexColor);
+        if (window.AndroidCar && window.AndroidCar.onPartTapped) {
+          window.AndroidCar.onPartTapped(key, state.open);
         }
-      },
-
-      setSteeringAngle: (deg) => {
-        targetSteeringAngle = THREE.MathUtils.degToRad(deg);
-      },
-
-      setSpeed: (mph) => {
-        currentSpeedMph = mph;
-      },
-
-      setCameraPreset: (preset) => {
-        window.setPreset(preset);
-      }
-    };
-
-    function updateDoorsBadge() {
-      const openDoors = Object.entries(doorStates).filter(([_, s]) => s.open);
-      const badge = document.getElementById('badge-doors');
-      const label = document.getElementById('label-doors');
-
-      if (openDoors.length > 0) {
-        badge.className = "hud-badge warning";
-        label.innerText = openDoors.length === 1 ? openDoors[0][1].label + " OPEN" : "DOORS OPEN (" + openDoors.length + ")";
-      } else {
-        badge.className = "hud-badge";
-        label.innerText = "DOORS SECURED";
-      }
-    }
-
-    window.applyColor = function(hex, elem) {
-      document.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
-      if (elem) elem.classList.add('active');
-      window.CruzeBridge.setExteriorColor(hex);
-    };
-
-    window.setPreset = function(preset) {
-      document.querySelectorAll('.cam-btn').forEach(b => b.classList.remove('active'));
-      const activeBtn = Array.from(document.querySelectorAll('.cam-btn')).find(b => b.innerText.toLowerCase().includes(preset));
-      if (activeBtn) activeBtn.classList.add('active');
-
-      switch (preset) {
-        case 'beauty':
-          animateCameraTo(-3.2, 1.8, 3.6, 0, 0.65, 0);
-          break;
-        case 'top':
-          animateCameraTo(0.01, 5.2, 0.1, 0, 0.4, 0);
-          break;
-        case 'cabin':
-          animateCameraTo(-0.45, 1.15, 0.1, -0.38, 0.85, 0.8);
-          break;
-        case 'rear':
-          animateCameraTo(0, 1.6, -4.0, 0, 0.65, -0.4);
-          break;
-      }
-    };
-
-    function animateCameraTo(cx, cy, cz, tx, ty, tz) {
-      const startPos = camera.position.clone();
-      const targetPos = new THREE.Vector3(cx, cy, cz);
-      const startTarget = controls.target.clone();
-      const endTarget = new THREE.Vector3(tx, ty, tz);
-
-      let t = 0;
-      function stepCam() {
-        t += 0.045;
-        const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-        camera.position.lerpVectors(startPos, targetPos, ease);
-        controls.target.lerpVectors(startTarget, endTarget, ease);
-        if (t < 1.0) requestAnimationFrame(stepCam);
-      }
-      stepCam();
-    }
-
-    function onWindowResize() {
-      const container = document.getElementById('canvas-container');
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    }
-
-    function animate() {
-      requestAnimationFrame(animate);
-
-      // Steering wheel and front wheel turn
-      currentSteeringAngle = THREE.MathUtils.lerp(currentSteeringAngle, targetSteeringAngle, 0.15);
-      if (steeringWheel) steeringWheel.rotation.y = currentSteeringAngle;
-      if (wheels[0]) wheels[0].rotation.y = currentSteeringAngle * 0.45;
-      if (wheels[1]) wheels[1].rotation.y = currentSteeringAngle * 0.45;
-
-      // Wheel spin from vehicle speed
-      if (currentSpeedMph > 0) {
-        const delta = (currentSpeedMph * 0.05);
-        wheels.forEach(w => w.rotation.x += delta);
       }
 
-      controls.update();
-      renderer.render(scene, camera);
-    }
+      window.CruzeBridge = {
+        setDoorState: function(door, isOpen) {
+          if (!doorStates[door]) return;
+          doorStates[door].open = isOpen;
+          updateDoorsBadge();
+        },
+
+        setLightsState: function(headlightsOn, brakeOn, leftTurn, rightTurn) {
+          headlights.forEach(function(l) { l.intensity = headlightsOn ? 4.0 : 0; });
+          taillights.forEach(function(l) { l.intensity = brakeOn ? 4.8 : (headlightsOn ? 1.4 : 0); });
+          var badge = document.getElementById('badge-lights');
+          if (badge) badge.classList.toggle('active', headlightsOn);
+          var label = document.getElementById('label-lights');
+          if (label) label.innerText = headlightsOn ? "LIGHTS ON" : "LIGHTS AUTO";
+        },
+
+        setExteriorColor: function(hexColor) {
+          if (paintMaterial) {
+            paintMaterial.color.set(hexColor);
+          }
+        },
+
+        setSteeringAngle: function(deg) {
+          targetSteeringAngle = THREE.MathUtils.degToRad(deg);
+        },
+
+        setSpeed: function(mph) {
+          currentSpeedMph = mph;
+        },
+
+        setCameraPreset: function(preset) {
+          window.setPreset(preset);
+        }
+      };
+
+      function updateDoorsBadge() {
+        var openDoors = Object.keys(doorStates).filter(function(k) { return doorStates[k].open; });
+        var badge = document.getElementById('badge-doors');
+        var label = document.getElementById('label-doors');
+        if (!badge || !label) return;
+
+        if (openDoors.length > 0) {
+          badge.className = "hud-badge warning";
+          label.innerText = openDoors.length === 1 ? doorStates[openDoors[0]].label + " OPEN" : "DOORS OPEN (" + openDoors.length + ")";
+        } else {
+          badge.className = "hud-badge";
+          label.innerText = "DOORS SECURED";
+        }
+      }
+
+      window.applyColor = function(hex, elem) {
+        document.querySelectorAll('.swatch').forEach(function(s) { s.classList.remove('active'); });
+        if (elem) elem.classList.add('active');
+        window.CruzeBridge.setExteriorColor(hex);
+      };
+
+      window.setPreset = function(preset) {
+        document.querySelectorAll('.cam-btn').forEach(function(b) { b.classList.remove('active'); });
+        var btns = Array.from(document.querySelectorAll('.cam-btn'));
+        var activeBtn = btns.find(function(b) { return b.innerText.toLowerCase().indexOf(preset) !== -1; });
+        if (activeBtn) activeBtn.classList.add('active');
+
+        switch (preset) {
+          case 'beauty':
+            animateCameraTo(-3.2, 1.8, 3.6, 0, 0.65, 0);
+            break;
+          case 'top':
+            animateCameraTo(0.01, 5.2, 0.1, 0, 0.4, 0);
+            break;
+          case 'cabin':
+            animateCameraTo(-0.45, 1.15, 0.1, -0.38, 0.85, 0.8);
+            break;
+          case 'rear':
+            animateCameraTo(0, 1.6, -4.0, 0, 0.65, -0.4);
+            break;
+        }
+      };
+
+      function animateCameraTo(cx, cy, cz, tx, ty, tz) {
+        var startPos = camera.position.clone();
+        var targetPos = new THREE.Vector3(cx, cy, cz);
+        var startTarget = controls.target.clone();
+        var endTarget = new THREE.Vector3(tx, ty, tz);
+
+        var t = 0;
+        function stepCam() {
+          t += 0.045;
+          var ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+          camera.position.lerpVectors(startPos, targetPos, ease);
+          controls.target.lerpVectors(startTarget, endTarget, ease);
+          if (t < 1.0) requestAnimationFrame(stepCam);
+        }
+        stepCam();
+      }
+
+      function onWindowResize() {
+        var container = document.getElementById('canvas-container');
+        var w = container.clientWidth || window.innerWidth;
+        var h = container.clientHeight || window.innerHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        currentSteeringAngle = THREE.MathUtils.lerp(currentSteeringAngle, targetSteeringAngle, 0.15);
+        if (steeringWheel) steeringWheel.rotation.y = currentSteeringAngle;
+        if (wheels[0]) wheels[0].rotation.y = currentSteeringAngle * 0.45;
+        if (wheels[1]) wheels[1].rotation.y = currentSteeringAngle * 0.45;
+
+        if (currentSpeedMph > 0) {
+          var delta = (currentSpeedMph * 0.05);
+          wheels.forEach(function(w) { w.rotation.x += delta; });
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+      }
+    })();
   </script>
 </body>
 </html>
