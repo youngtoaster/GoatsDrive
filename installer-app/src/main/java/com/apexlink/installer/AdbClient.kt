@@ -1,9 +1,13 @@
 package com.apexlink.installer
 
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
+import android.hardware.usb.UsbManager
 import android.util.Log
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.io.OutputStream
+import java.io.*
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteBuffer
@@ -11,10 +15,173 @@ import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 
 /**
- * Lightweight, zero-dependency ADB client communicating over TCP port 5555.
- * Implements ADB packet framing: [Command(4), Arg0(4), Arg1(4), DataLen(4), DataCrc(4), Magic(4)]
+ * Common abstraction for ADB transport layer: TCP socket or USB bulk endpoints.
  */
-class AdbClient(private val host: String, private val port: Int = 5555) : AutoCloseable {
+interface AdbTransport : AutoCloseable {
+    fun connect(timeoutMs: Int = 5000): Boolean
+    fun readExact(buffer: ByteArray, offset: Int, length: Int)
+    fun write(buffer: ByteArray, offset: Int, length: Int)
+    val name: String
+    val isUsb: Boolean
+}
+
+/**
+ * Standard TCP ADB Transport (Wi-Fi, Hotspot, or USB Reverse Tethering / RNDIS).
+ */
+class TcpAdbTransport(val host: String, val port: Int = 5555) : AdbTransport {
+    private var socket: Socket? = null
+    private var inStream: InputStream? = null
+    private var outStream: OutputStream? = null
+
+    override val name: String get() = "TCP ($host:$port)"
+    override val isUsb: Boolean get() = false
+
+    override fun connect(timeoutMs: Int): Boolean {
+        return try {
+            val s = Socket()
+            s.connect(InetSocketAddress(host, port), timeoutMs)
+            s.tcpNoDelay = true
+            s.soTimeout = 10000
+            socket = s
+            inStream = s.getInputStream()
+            outStream = s.getOutputStream()
+            true
+        } catch (e: Exception) {
+            Log.e("GD_TcpTransport", "TCP connect failed to $host:$port: ${e.message}")
+            false
+        }
+    }
+
+    override fun readExact(buffer: ByteArray, offset: Int, length: Int) {
+        val input = inStream ?: throw IOException("TCP socket not connected")
+        var readTotal = 0
+        while (readTotal < length) {
+            val r = input.read(buffer, offset + readTotal, length - readTotal)
+            if (r < 0) throw EOFException("EOF reading from TCP socket")
+            readTotal += r
+        }
+    }
+
+    override fun write(buffer: ByteArray, offset: Int, length: Int) {
+        val out = outStream ?: throw IOException("TCP socket not connected")
+        out.write(buffer, offset, length)
+        out.flush()
+    }
+
+    override fun close() {
+        try { socket?.close() } catch (ignored: Exception) {}
+        socket = null
+        inStream = null
+        outStream = null
+    }
+}
+
+/**
+ * Direct USB ADB Transport (Host / OTG Mode).
+ * Uses USB bulk endpoints with ADB interface class 255, subclass 66, protocol 1.
+ */
+class UsbAdbTransport(
+    private val usbManager: UsbManager,
+    private val device: UsbDevice
+) : AdbTransport {
+    private var connection: UsbDeviceConnection? = null
+    private var adbInterface: UsbInterface? = null
+    private var inEndpoint: UsbEndpoint? = null
+    private var outEndpoint: UsbEndpoint? = null
+
+    override val name: String get() = "USB (${device.productName ?: device.deviceName})"
+    override val isUsb: Boolean get() = true
+
+    override fun connect(timeoutMs: Int): Boolean {
+        for (i in 0 until device.interfaceCount) {
+            val intf = device.getInterface(i)
+            if (intf.interfaceClass == 0xFF && intf.interfaceSubclass == 0x42 && intf.interfaceProtocol == 0x01) {
+                adbInterface = intf
+                for (e in 0 until intf.endpointCount) {
+                    val ep = intf.getEndpoint(e)
+                    if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                        if (ep.direction == UsbConstants.USB_DIR_IN) {
+                            inEndpoint = ep
+                        } else {
+                            outEndpoint = ep
+                        }
+                    }
+                }
+                break
+            }
+        }
+
+        if (adbInterface == null || inEndpoint == null || outEndpoint == null) {
+            Log.w("GD_UsbTransport", "Could not locate ADB endpoints on USB device ${device.deviceName}")
+            return false
+        }
+
+        val conn = usbManager.openDevice(device)
+        if (conn == null) {
+            Log.e("GD_UsbTransport", "Failed to open USB device connection (permission required)")
+            return false
+        }
+
+        if (!conn.claimInterface(adbInterface, true)) {
+            Log.e("GD_UsbTransport", "Failed to claim USB ADB interface")
+            conn.close()
+            return false
+        }
+
+        connection = conn
+        return true
+    }
+
+    override fun readExact(buffer: ByteArray, offset: Int, length: Int) {
+        val conn = connection ?: throw IOException("USB connection closed")
+        val epIn = inEndpoint ?: throw IOException("No USB IN endpoint")
+        var readTotal = 0
+        val timeout = 10000
+
+        while (readTotal < length) {
+            val chunk = Math.min(length - readTotal, epIn.maxPacketSize.coerceAtLeast(16384))
+            val temp = ByteArray(chunk)
+            val r = conn.bulkTransfer(epIn, temp, chunk, timeout)
+            if (r < 0) throw IOException("USB bulkTransfer IN failed with code $r")
+            if (r == 0) continue
+            System.arraycopy(temp, 0, buffer, offset + readTotal, r)
+            readTotal += r
+        }
+    }
+
+    override fun write(buffer: ByteArray, offset: Int, length: Int) {
+        val conn = connection ?: throw IOException("USB connection closed")
+        val epOut = outEndpoint ?: throw IOException("No USB OUT endpoint")
+        var writtenTotal = 0
+        val timeout = 10000
+
+        while (writtenTotal < length) {
+            val chunk = Math.min(length - writtenTotal, epOut.maxPacketSize.coerceAtLeast(16384))
+            val temp = ByteArray(chunk)
+            System.arraycopy(buffer, offset + writtenTotal, temp, 0, chunk)
+            val w = conn.bulkTransfer(epOut, temp, chunk, timeout)
+            if (w < 0) throw IOException("USB bulkTransfer OUT failed with code $w")
+            writtenTotal += w
+        }
+    }
+
+    override fun close() {
+        try {
+            adbInterface?.let { connection?.releaseInterface(it) }
+            connection?.close()
+        } catch (ignored: Exception) {}
+        connection = null
+    }
+}
+
+/**
+ * High-performance, zero-dependency ADB client.
+ * Supports both TCP (Wi-Fi/Hotspot/Tethering) and direct USB Host/OTG connections.
+ */
+class AdbClient(val transport: AdbTransport) : AutoCloseable {
+
+    constructor(host: String, port: Int = 5555) : this(TcpAdbTransport(host, port))
+    constructor(usbManager: UsbManager, device: UsbDevice) : this(UsbAdbTransport(usbManager, device))
 
     companion object {
         private const val TAG = "GD_AdbClient"
@@ -30,9 +197,6 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
         const val MAX_PAYLOAD = 64 * 1024
     }
 
-    private var socket: Socket? = null
-    private var inputStream: InputStream? = null
-    private var outputStream: OutputStream? = null
     private var localStreamId = 1
 
     data class TestResult(
@@ -48,7 +212,7 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
             if (!connect(timeoutMs)) {
                 TestResult(
                     success = false,
-                    errorMessage = "Connection refused or timed out on port $port. Check if Wireless ADB is enabled in Factory Settings."
+                    errorMessage = "Connection refused or timed out (${transport.name}). Check if USB Debugging / Wireless ADB is enabled."
                 )
             } else {
                 val model = executeShell("getprop ro.product.model").trim()
@@ -70,14 +234,9 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
 
     fun connect(timeoutMs: Int = 5000): Boolean {
         return try {
-            val s = Socket()
-            s.connect(InetSocketAddress(host, port), timeoutMs)
-            s.tcpNoDelay = true
-            s.soTimeout = 10000
-
-            socket = s
-            inputStream = s.getInputStream()
-            outputStream = s.getOutputStream()
+            if (!transport.connect(timeoutMs)) {
+                return false
+            }
 
             // Send A_CNXN packet
             val payload = "host::GoatsInstaller\u0000".toByteArray(StandardCharsets.UTF_8)
@@ -86,14 +245,14 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
             // Read response
             val resp = readPacket()
             if (resp.command == A_CNXN) {
-                Log.i(TAG, "ADB Handshake successful: ${String(resp.payload, StandardCharsets.UTF_8)}")
+                Log.i(TAG, "ADB Handshake successful via ${transport.name}: ${String(resp.payload, StandardCharsets.UTF_8)}")
                 true
             } else {
                 Log.w(TAG, "Unexpected ADB response: 0x${Integer.toHexString(resp.command)}")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "ADB Connection failed: ${e.message}")
+            Log.e(TAG, "ADB Handshake failed: ${e.message}")
             false
         }
     }
@@ -132,10 +291,12 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
     }
 
     /**
-     * Streams file bytes into remote path via ADB Sync protocol.
+     * Streams file bytes from an InputStream into remote path via ADB Sync protocol.
+     * Memory-efficient: never loads multi-megabyte APKs entirely into heap.
      */
-    fun pushFile(
-        fileBytes: ByteArray,
+    fun pushStream(
+        inputStream: InputStream,
+        totalBytes: Long,
         remotePath: String,
         onProgress: (Float) -> Unit
     ): Boolean {
@@ -150,8 +311,6 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
             return false
         }
         remoteStreamId = openResp.arg0
-
-        val out = outputStream ?: return false
 
         // Send SEND request: "SEND" + pathLen + path + ",33206" (octal mode 0666)
         val pathBytes = "$remotePath,33206".toByteArray(StandardCharsets.UTF_8)
@@ -168,24 +327,26 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
 
         // Stream DATA chunks
         val chunkSize = 32 * 1024
-        var offset = 0
-        val total = fileBytes.size
+        val chunkBuf = ByteArray(chunkSize)
+        var totalRead = 0L
+        var r: Int
 
-        while (offset < total) {
-            val len = Math.min(chunkSize, total - offset)
+        while (inputStream.read(chunkBuf).also { r = it } != -1) {
             val dataHeader = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
             dataHeader.put("DATA".toByteArray(StandardCharsets.US_ASCII))
-            dataHeader.putInt(len)
+            dataHeader.putInt(r)
 
-            val chunk = ByteArray(8 + len)
+            val chunk = ByteArray(8 + r)
             System.arraycopy(dataHeader.array(), 0, chunk, 0, 8)
-            System.arraycopy(fileBytes, offset, chunk, 8, len)
+            System.arraycopy(chunkBuf, 0, chunk, 8, r)
 
             sendPacket(A_WRTE, streamId, remoteStreamId, chunk)
             readPacket() // Read OKAY
 
-            offset += len
-            onProgress(offset.toFloat() / total.toFloat())
+            totalRead += r
+            if (totalBytes > 0) {
+                onProgress(totalRead.toFloat() / totalBytes.toFloat())
+            }
         }
 
         // Send DONE request: "DONE" + timestamp
@@ -201,8 +362,19 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
         return true
     }
 
+    /**
+     * Streams file bytes into remote path via ADB Sync protocol.
+     */
+    fun pushFile(
+        fileBytes: ByteArray,
+        remotePath: String,
+        onProgress: (Float) -> Unit
+    ): Boolean {
+        val inStream = ByteArrayInputStream(fileBytes)
+        return pushStream(inStream, fileBytes.size.toLong(), remotePath, onProgress)
+    }
+
     private fun sendPacket(cmd: Int, arg0: Int, arg1: Int, payload: ByteArray) {
-        val out = outputStream ?: return
         val buf = ByteBuffer.allocate(24 + payload.size).order(ByteOrder.LITTLE_ENDIAN)
 
         buf.putInt(cmd)
@@ -221,19 +393,13 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
             buf.put(payload)
         }
 
-        out.write(buf.array())
-        out.flush()
+        val array = buf.array()
+        transport.write(array, 0, array.size)
     }
 
     private fun readPacket(): AdbPacket {
-        val inStream = inputStream ?: throw IllegalStateException("Not connected")
         val header = ByteArray(24)
-        var read = 0
-        while (read < 24) {
-            val r = inStream.read(header, read, 24 - read)
-            if (r < 0) throw IllegalStateException("EOF reading ADB header")
-            read += r
-        }
+        transport.readExact(header, 0, 24)
 
         val buf = ByteBuffer.wrap(header).order(ByteOrder.LITTLE_ENDIAN)
         val cmd = buf.getInt()
@@ -244,11 +410,8 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
         val magic = buf.getInt()
 
         val payload = ByteArray(len)
-        var pRead = 0
-        while (pRead < len) {
-            val r = inStream.read(payload, pRead, len - pRead)
-            if (r < 0) throw IllegalStateException("EOF reading ADB payload")
-            pRead += r
+        if (len > 0) {
+            transport.readExact(payload, 0, len)
         }
 
         return AdbPacket(cmd, arg0, arg1, len, crc, magic, payload)
@@ -256,11 +419,8 @@ class AdbClient(private val host: String, private val port: Int = 5555) : AutoCl
 
     override fun close() {
         try {
-            socket?.close()
+            transport.close()
         } catch (ignored: Exception) {}
-        socket = null
-        inputStream = null
-        outputStream = null
     }
 
     data class AdbPacket(

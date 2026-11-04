@@ -14,7 +14,7 @@ import android.widget.TextView
 /**
  * Interactive, high-contrast in-app guide explaining step-by-step
  * how to connect an Android phone to aftermarket car head units (FYT, Topway, Allwinner)
- * and enable Wireless ADB on port 5555.
+ * via USB Cable or Wi-Fi, enable ADB on port 5555, and sideload any APK.
  */
 object SetupGuideDialog {
 
@@ -32,7 +32,7 @@ object SetupGuideDialog {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
+                ViewGroup.LayoutParams.WRAP_CONTENT
             )
         }
         scroll.addView(layout)
@@ -78,7 +78,7 @@ object SetupGuideDialog {
 
         // Title
         val titleView = TextView(context).apply {
-            text = "📖 Head Unit Setup & Wireless ADB Guide"
+            text = "📖 Head Unit Setup & Installation Guide"
             textSize = 20f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
@@ -87,20 +87,30 @@ object SetupGuideDialog {
         }
         layout.addView(titleView)
 
-        addHeader("📶 STEP 1: Connect Phone & Car Head Unit", "#64B5F6")
+        addHeader("🔌 METHOD 1: Fast USB Cable Installation (No Wi-Fi Needed)", "#80D8FF")
         addParagraph(
-            "Both devices must be on the <b>same local Wi-Fi network</b> so your phone can communicate with the head unit's ADB daemon.<br><br>" +
-            "<b>Option A (Easiest in Car - Mobile Hotspot):</b><br>" +
+            "You can install GoatsDrive or any APK directly over a USB cable plugged between your phone and car head unit!<br><br>" +
+            "<b>Option A (USB OTG / Host Mode):</b><br>" +
+            "Plug your phone into the head unit using an OTG adapter or Type-C cable. Tap <i>'Install via USB'</i>. When Android prompts <i>'Allow USB Permission'</i>, tap OK to begin flashing.<br><br>" +
+            "<b>Option B (Standard USB Cable + USB Tethering):</b><br>" +
+            "1. Plug your phone into the car's USB port with your normal charging/sync cable.<br>" +
+            "2. On your phone, go to <b>Settings &gt; Network &gt; Hotspot &amp; Tethering &gt; Enable USB Tethering</b>.<br>" +
+            "3. Tap <b>'Install via USB'</b> in GoatsInstaller. The app detects the USB network link and deploys instantly!"
+        )
+
+        addHeader("📶 METHOD 2: Wireless Wi-Fi / Hotspot Installation", "#64B5F6")
+        addParagraph(
+            "<b>In Car (Mobile Hotspot):</b><br>" +
             "1. Turn on <b>Personal Hotspot</b> on your phone.<br>" +
-            "2. On your Car Head Unit, go to <i>Settings &gt; Wi-Fi</i> and connect to your phone's hotspot.<br>" +
-            "3. In this mode, the Head Unit's IP is almost always <b>192.168.43.1</b> (or check your phone's Connected Devices list).<br><br>" +
-            "<b>Option B (Home / Garage Wi-Fi):</b><br>" +
+            "2. On your Car Head Unit, connect to your phone's Wi-Fi hotspot.<br>" +
+            "3. In this mode, the Head Unit's IP is almost always <b>192.168.43.1</b>.<br><br>" +
+            "<b>In Garage / Home:</b><br>" +
             "Connect both your phone and car head unit to your home Wi-Fi network."
         )
 
-        addHeader("🔓 STEP 2: Enable Wireless ADB (Port 5555)", "#81C784")
+        addHeader("🔓 Enabling USB Debugging / ADB on Head Unit", "#81C784")
         addParagraph(
-            "Android head units support ADB over Wi-Fi on port <b>5555</b> once USB Debugging is turned on in Factory / Developer Settings:"
+            "Ensure USB Debugging / Wireless ADB is enabled in your head unit's factory settings:"
         )
 
         addParagraph("<b>1. FYT Boards (UIS7862, UIS8581, FYT6021, DuduAuto, Joying, Mekede):</b>")
@@ -128,27 +138,18 @@ object SetupGuideDialog {
             "  -> Turn ON 'USB Debugging' switch"
         )
 
+        addHeader("📁 Sideloading ANY APK from Your Phone", "#FFD54F")
         addParagraph(
-            "💡 <i>Tip: After turning ON USB Debugging, the head unit automatically opens port 5555. No root or PC is required!</i>"
-        )
-
-        addHeader("🌐 STEP 3: Finding the Head Unit's IP Address", "#FFD54F")
-        addParagraph(
-            "• <b>On Head Unit:</b> Open <i>Settings &gt; Network &amp; Internet &gt; Wi-Fi</i>, tap your connected Wi-Fi network, expand <b>Advanced</b>, and find <b>IP Address</b> (e.g. 192.168.1.105 or 192.168.43.x).<br><br>" +
-            "• <b>On Phone:</b> If the head unit is connected to your Phone Hotspot, go to <i>Settings &gt; Hotspot &gt; Connected Devices</i> to see its exact IP address."
-        )
-
-        addHeader("⚡ STEP 4: Test Connection & Flash GoatsDrive", "#FF8A65")
-        addParagraph(
-            "1. Enter the IP into GoatsInstaller and tap <b>🔍 Test Connection</b>.<br>" +
-            "2. If verified, keep <b>[x] Disable bloated factory ZLink5</b> checked.<br>" +
-            "3. Tap <b>⚡ Flash GoatsDrive to Head Unit</b>.<br>" +
-            "4. GoatsInstaller will automatically verify the latest build, upload the APK, install it, grant system permissions, and launch GoatsDrive on your car display!"
+            "Need Spotify, Waze, YouTube Music, or another car app without Google Play Store?<br>" +
+            "1. Switch the target to <b>'Custom APK from Phone'</b>.<br>" +
+            "2. Tap <b>📂 Choose APK File</b> and pick any <code>.apk</code> saved on your phone.<br>" +
+            "3. Tap <b>Install via USB</b> or <b>Install via Wi-Fi</b>.<br>" +
+            "4. GoatsInstaller will upload, install, grant permissions, and launch the app right on your dashboard!"
         )
 
         addHeader("🛡️ Why Disable ZLink5?", "#E57373")
         addParagraph(
-            "Factory ZLink5 takes over the Bluetooth and USB hardware with bloated background processes that cause memory exhaustion and audio/touch lag on 2GB RAM head units.<br><br>" +
+            "Factory ZLink5 takes over the Bluetooth and USB hardware with bloated background daemons that cause memory exhaustion and audio/touch lag on 2GB RAM head units.<br><br>" +
             "Disabling it allows GoatsDrive to run with <b>zero-copy native C++ hardware acceleration under 35MB RAM</b> with sub-5ms touch response."
         )
 

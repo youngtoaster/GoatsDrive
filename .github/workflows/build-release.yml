@@ -83,22 +83,24 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name == 'main' && 'v1.0.0' || github.ref_name }}
-          name: "GoatsDrive v1.0.0 — Zero-Copy Projection Receiver & Smart Installer"
+          name: "GoatsDrive v1.0.0 — Zero-Copy Receiver, USB Installer & Sideload Deployer"
           body: |
             ## ⚡ GoatsDrive v1.0.0 Release
 
             Ultra-lightweight, zero-copy Android Auto & CarPlay projection receiver designed for 2GB RAM aftermarket Android head units (FYT 7862/8581, Topway TS10/TS18, T3L).
 
             ### 📦 Included APKs:
-            * **`GoatsDrive.apk`**: The zero-copy receiver engine to run directly on the car head unit screen.
-            * **`GoatsInstaller.apk`**: Smart phone installer app with automated head unit connection testing, interactive factory setup guide, live GitHub release updater, and 1-click ZLink5 removal.
+            * **`GoatsDrive.apk`**: The zero-copy receiver engine running directly on the car head unit screen.
+            * **`GoatsInstaller.apk`**: Smart phone companion app supporting **direct USB cable installation**, custom APK sideloading, Wi-Fi ADB, live GitHub updates, and factory ZLink5 replacement.
 
             ### 🚀 Quick Install from Your Android Phone:
             1. Download and install **`GoatsInstaller.apk`** on your Android smartphone.
-            2. Connect phone and Head Unit to the same Wi-Fi (or turn on Phone Personal Hotspot and connect Head Unit to it).
-            3. Tap **📖 Connection & Setup Guide** inside the app for step-by-step instructions and factory PINs (`3368`, `8888`, `1617`) to enable Wireless ADB.
-            4. Tap **🔍 Test ADB Connection** to verify connection to your head unit.
-            5. Tap **⚡ Flash GoatsDrive to Head Unit** — GoatsInstaller automatically fetches the latest build, suppresses factory ZLink5, installs GoatsDrive, grants permissions, and boots it onto your car screen!
+            2. Choose your connection method:
+               * **🔌 Direct USB Install:** Plug your phone into the head unit with a USB cable and tap **"Install via USB"**.
+               * **📶 Wi-Fi / Hotspot Install:** Connect to the same network and tap **"Install via Wi-Fi"**.
+            3. Choose what to install:
+               * **⚡ GoatsDrive Receiver:** Automatically fetches the latest build, suppresses factory ZLink5, installs GoatsDrive, and boots it onto your car screen.
+               * **📁 Sideload Custom APK:** Pick any `.apk` on your phone (Spotify, Waze, YouTube Music, etc.) to install directly on the head unit without needing Google Play Store or a flash drive!
           files: |
             release-artifacts/GoatsDrive.apk
             release-artifacts/GoatsInstaller.apk

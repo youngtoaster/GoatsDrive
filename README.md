@@ -26,18 +26,15 @@ You can deploy GoatsDrive to your car's head unit directly from your phone in un
 
 ### Method 1: GoatsInstaller Companion App (Recommended)
 1. Download **`GoatsInstaller.apk`** from [Latest GitHub Releases](https://github.com/youngtoaster/GoatsDrive/releases/latest) onto your Android smartphone.
-2. Connect your phone to your car's Wi-Fi hotspot (or turn on your phone's personal hotspot and connect the head unit to it).
-3. Open **GoatsInstaller** on your phone:
-   * Tap **📖 Connection & Setup Guide** inside the app for step-by-step instructions and factory PINs (`3368`, `8888`, `1617`) to enable Wireless ADB on FYT, Topway, or Allwinner boards.
-   * Tap **🔍 Test ADB Connection** to verify your head unit is reachable and detect its hardware model.
-   * Tap **🔄 Check GitHub** — the installer automatically checks and downloads the newest `GoatsDrive.apk` release build before flashing.
-4. Ensure **"Disable bloated factory ZLink5"** is checked.
-5. Tap **⚡ Flash GoatsDrive to Head Unit**.
-   * Automatically fetches the latest receiver APK.
-   * Disables factory ZLink5 to stop MCU crashes.
-   * Uploads and installs `GoatsDrive.apk` via ADB.
-   * Grants automotive overlay (`SYSTEM_ALERT_WINDOW`) & battery whitelist permissions.
-   * Immediately launches GoatsDrive on the head unit screen!
+2. Choose your connection method:
+   * **🔌 Fast USB Cable Install:** Plug phone into head unit via USB cable. Tap **"Install via USB"** (supports OTG host mode & USB Tethering).
+   * **📶 Wi-Fi / Hotspot Install:** Connect phone and head unit to the same Wi-Fi/Hotspot, enter IP, and tap **"Install via Wi-Fi"**.
+3. Choose what to install:
+   * **⚡ GoatsDrive Receiver:** Automatically fetches the latest build, suppresses factory ZLink5, installs GoatsDrive, and boots it onto your car screen.
+   * **📁 Sideload Custom APK:** Tap **"Select APK File from Phone"** to pick any app saved on your phone (Spotify, Waze, YouTube Music, etc.) and deploy it straight to your car without needing a USB flash drive or Google Play Store!
+4. In-App Tools:
+   * **📖 Connection & Setup Guide:** In-app walkthrough with factory PINs (`3368`, `8888`, `1617`) for FYT, Topway, and Allwinner boards.
+   * **🔍 Test ADB Connection:** One-tap hardware check that verifies connection and displays head unit model and Android version.
 
 ### Method 2: One-Line Termux / ADB Command (From Phone or PC)
 If you have **Termux** on your phone or `adb` on your PC/Mac:
